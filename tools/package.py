@@ -29,8 +29,10 @@ PAYLOAD = [
     (f"Cores/{CORE}/input.json", f"Cores/{CORE}/input.json"),
     (f"Cores/{CORE}/audio.json", f"Cores/{CORE}/audio.json"),
     (f"Cores/{CORE}/interact.json", f"Cores/{CORE}/interact.json"),
+    (f"Cores/{CORE}/variants.json", f"Cores/{CORE}/variants.json"),
     (f"Cores/{CORE}/bitstream.rbf_r", f"Cores/{CORE}/bitstream.rbf_r"),
     ("Platforms/imageviewer.json", "Platforms/imageviewer.json"),
+    ("Platforms/_images/imageviewer.bin", "Platforms/_images/imageviewer.bin"),
 ]
 
 
