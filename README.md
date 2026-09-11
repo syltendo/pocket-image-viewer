@@ -22,23 +22,27 @@ Every push to `main` triggers the GitHub Actions workflow
 Download the artifact from the Actions tab, unzip it onto your SD card root,
 and the core appears in the Pocket's core list.
 
-## Installing an image
+## Installing images
 
-The core reads a single 24-bit BMP via data slot 1:
+The core has 8 image slots, each holding one 24-bit BMP:
 
 ```
-Assets/imageviewer/syltendo.imageviewer/common/image.bmp
+Assets/imageviewer/syltendo.imageviewer/common/img1.bmp
+Assets/imageviewer/syltendo.imageviewer/common/img2.bmp
+...
+Assets/imageviewer/syltendo.imageviewer/common/img8.bmp
 ```
 
 Convert anything to the right format with the included script
 (requires `pip install pillow`):
 
 ```
-python3 tools/bmp_convert.py photo.png "Assets/imageviewer/syltendo.imageviewer/common/image.bmp"
+python3 tools/bmp_convert.py photo.png "Assets/imageviewer/syltendo.imageviewer/common/img1.bmp"
 ```
 
-Because the data slot is marked user-reloadable, you can swap the image from
-the Pocket's core menu without rebooting (once the viewer RTL lands).
+Use left/right on the d-pad to switch between the loaded images.
+Because the data slots are marked user-reloadable, you can swap images
+from the Pocket's core menu without rebooting.
 
 ## Building locally (optional)
 
@@ -53,7 +57,7 @@ If you'd rather build on your own machine instead of CI:
 .github/workflows/build.yml   CI: Quartus-in-Docker build + packaging
 Cores/syltendo.imageviewer/   APF core definition (JSONs + bitstream.rbf_r)
 Platforms/imageviewer.json    Custom platform entry for the Library
-Assets/imageviewer/...        Where image.bmp goes on the SD card
+Assets/imageviewer/...        Where img1.bmp..img8.bmp go on the SD card
 src/fpga/                     Quartus project (Analogue APF template + our RTL)
   apf/                        Analogue Pocket Framework (do not modify)
   core/                       Our logic: core_top.v et al.

@@ -742,8 +742,12 @@ set_global_assignment -name VERILOG_FILE core/core_top.v
 set_global_assignment -name VERILOG_FILE core/core_bridge_cmd.v
 set_global_assignment -name SDC_FILE core/core_constraints.sdc
 set_global_assignment -name SIGNALTAP_FILE core/stp1.stp
-set_global_assignment -name QIP_FILE core/mf_pllbase.qip
-set_global_assignment -name SIP_FILE core/mf_pllbase.sip
+set_global_assignment -name VERILOG_FILE core/pll_imageviewer.v
+set_global_assignment -name VERILOG_FILE core/sdram_ctrl.v
+set_global_assignment -name VERILOG_FILE core/bmp_parser.v
+set_global_assignment -name VERILOG_FILE core/slot_mgr.v
+set_global_assignment -name VERILOG_FILE core/video_scanout.v
+set_global_assignment -name VERILOG_FILE core/async_fifo.v
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to bridge_1wire
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to bridge_spiclk
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to bridge_spimiso

@@ -1,8 +1,24 @@
 //
-// User core top-level
+// User core top-level: Analogue Pocket image viewer.
 //
 // Instantiated by the real top-level: apf_top
 //
+// What it does:
+//   - 8 image data slots (data.json). The Pocket streams a 24-bit BMP into
+//     each slot at boot (or on browser reload).
+//   - slot_mgr delays the data-slot ACK until the parser has cleared the
+//     slot's SDRAM framebuffer, then routes the streamed 32-bit words into
+//     the parser's input FIFO.
+//   - bmp_parser decodes the BMP (scale-to-fit, letterboxed) into the
+//     slot's 800x720 framebuffer in SDRAM.
+//   - video_scanout reads the selected slot line-by-line and outputs
+//     800x720@60 video.
+//   - D-pad left/right switches between the 8 slots.
+//
+// Clocking:
+//   clk_74a  - APF framework clock (bridge, slot_mgr, navigation)
+//   clk_mem  - 99 MHz SDRAM controller / parser / scanout read client
+//   clk_vid  - 39.6 MHz video pixel clock
 
 `default_nettype none
 
@@ -16,7 +32,7 @@ module core_top (
 // clock inputs 74.25mhz. not phase aligned, so treat these domains as asynchronous
 
 input   wire            clk_74a, // mainclk1
-input   wire            clk_74b, // mainclk1 
+input   wire            clk_74b, // mainclk1
 
 ///////////////////////////////////////////////////
 // cartridge interface
@@ -59,7 +75,7 @@ output  wire            cart_tran_pin31_dir,
 // infrared
 input   wire            port_ir_rx,
 output  wire            port_ir_tx,
-output  wire            port_ir_rx_disable, 
+output  wire            port_ir_rx_disable,
 
 // GBA link port
 inout   wire            port_tran_si,
@@ -70,7 +86,7 @@ inout   wire            port_tran_sck,
 output  wire            port_tran_sck_dir,
 inout   wire            port_tran_sd,
 output  wire            port_tran_sd_dir,
- 
+
 ///////////////////////////////////////////////////
 // cellular psram 0 and 1, two chips (64mbit x2 dual die per chip)
 
@@ -141,7 +157,7 @@ output  wire            user1,
 input   wire            user2,
 
 ///////////////////////////////////////////////////
-// RFU internal i2c bus 
+// RFU internal i2c bus
 
 inout   wire            aux_sda,
 output  wire            aux_scl,
@@ -164,7 +180,7 @@ output  wire            video_de,
 output  wire            video_skip,
 output  wire            video_vs,
 output  wire            video_hs,
-    
+
 output  wire            audio_mclk,
 input   wire            audio_adc,
 output  wire            audio_dac,
@@ -182,7 +198,7 @@ input   wire    [31:0]  bridge_wr_data,
 
 ///////////////////////////////////////////////////
 // controller data
-// 
+//
 // key bitmap:
 //   [0]    dpad_up
 //   [1]    dpad_down
@@ -222,7 +238,7 @@ input   wire    [15:0]  cont1_trig,
 input   wire    [15:0]  cont2_trig,
 input   wire    [15:0]  cont3_trig,
 input   wire    [15:0]  cont4_trig
-    
+
 );
 
 // not using the IR port, so turn off both the LED, and
@@ -230,7 +246,7 @@ input   wire    [15:0]  cont4_trig
 assign port_ir_tx = 0;
 assign port_ir_rx_disable = 1;
 
-// bridge endianness
+// bridge endianness: big-endian (first file byte in [31:24])
 assign bridge_endian_little = 0;
 
 // cart is unused, so set all level translators accordingly
@@ -285,16 +301,6 @@ assign cram1_we_n = 1;
 assign cram1_ub_n = 1;
 assign cram1_lb_n = 1;
 
-assign dram_a = 'h0;
-assign dram_ba = 'h0;
-assign dram_dq = {16{1'bZ}};
-assign dram_dqm = 'h0;
-assign dram_clk = 'h0;
-assign dram_cke = 'h0;
-assign dram_ras_n = 'h1;
-assign dram_cas_n = 'h1;
-assign dram_we_n = 'h1;
-
 assign sram_a = 'h0;
 assign sram_dq = {16{1'bZ}};
 assign sram_oe_n  = 1;
@@ -310,16 +316,19 @@ assign vpll_feed = 1'bZ;
 
 // for bridge write data, we just broadcast it to all bus devices
 // for bridge read data, we have to mux it
-// add your own devices here
+// debug/status register at 0x10xxxxxx:
+//   [7:0]  slot_valid bits, [8] input fifo overflow (sticky),
+//   [9] video underrun (sticky)
+wire [7:0]  slot_valid;
+wire        fifo_overflow;
+wire        video_underrun;
 always @(*) begin
     casex(bridge_addr)
     default: begin
         bridge_rd_data <= 0;
     end
     32'h10xxxxxx: begin
-        // example
-        // bridge_rd_data <= example_device_data;
-        bridge_rd_data <= 0;
+        bridge_rd_data <= {22'd0, video_underrun, fifo_overflow, slot_valid};
     end
     32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
@@ -333,28 +342,28 @@ end
 //
     wire            reset_n;                // driven by host commands, can be used as core-wide reset
     wire    [31:0]  cmd_bridge_rd_data;
-    
+
 // bridge host commands
 // synchronous to clk_74a
-    wire            status_boot_done = pll_core_locked_s; 
+    wire            status_boot_done = pll_core_locked_s;
     wire            status_setup_done = pll_core_locked_s; // rising edge triggers a target command
     wire            status_running = reset_n; // we are running as soon as reset_n goes high
 
     wire            dataslot_requestread;
     wire    [15:0]  dataslot_requestread_id;
-    wire            dataslot_requestread_ack = 1;
-    wire            dataslot_requestread_ok = 1;
+    wire            dataslot_requestread_ack = 1'b1;
+    wire            dataslot_requestread_ok = 1'b0;   // we don't serve reads
 
     wire            dataslot_requestwrite;
     wire    [15:0]  dataslot_requestwrite_id;
     wire    [31:0]  dataslot_requestwrite_size;
-    wire            dataslot_requestwrite_ack = 1;
-    wire            dataslot_requestwrite_ok = 1;
+    wire            dataslot_requestwrite_ack;
+    wire            dataslot_requestwrite_ok;
 
     wire            dataslot_update;
     wire    [15:0]  dataslot_update_id;
     wire    [31:0]  dataslot_update_size;
-    
+
     wire            dataslot_allcomplete;
 
     wire     [31:0] rtc_epoch_seconds;
@@ -362,45 +371,45 @@ end
     wire     [31:0] rtc_time_bcd;
     wire            rtc_valid;
 
-    wire            savestate_supported;
+    wire            savestate_supported = 1'b0;
     wire    [31:0]  savestate_addr;
     wire    [31:0]  savestate_size;
     wire    [31:0]  savestate_maxloadsize;
 
     wire            savestate_start;
-    wire            savestate_start_ack;
-    wire            savestate_start_busy;
-    wire            savestate_start_ok;
-    wire            savestate_start_err;
+    wire            savestate_start_ack = 1'b0;
+    wire            savestate_start_busy = 1'b0;
+    wire            savestate_start_ok = 1'b0;
+    wire            savestate_start_err = 1'b0;
 
     wire            savestate_load;
-    wire            savestate_load_ack;
-    wire            savestate_load_busy;
-    wire            savestate_load_ok;
-    wire            savestate_load_err;
-    
+    wire            savestate_load_ack = 1'b0;
+    wire            savestate_load_busy = 1'b0;
+    wire            savestate_load_ok = 1'b0;
+    wire            savestate_load_err = 1'b0;
+
     wire            osnotify_inmenu;
 
-// bridge target commands
+// bridge target commands: unused by this core
 // synchronous to clk_74a
 
-    reg             target_dataslot_read;       
-    reg             target_dataslot_write;
-    reg             target_dataslot_getfile;    // require additional param/resp structs to be mapped
-    reg             target_dataslot_openfile;   // require additional param/resp structs to be mapped
-    
-    wire            target_dataslot_ack;        
+    wire            target_dataslot_read = 1'b0;
+    wire            target_dataslot_write = 1'b0;
+    wire            target_dataslot_getfile = 1'b0;
+    wire            target_dataslot_openfile = 1'b0;
+
+    wire            target_dataslot_ack;
     wire            target_dataslot_done;
     wire    [2:0]   target_dataslot_err;
 
-    reg     [15:0]  target_dataslot_id;
-    reg     [31:0]  target_dataslot_slotoffset;
-    reg     [31:0]  target_dataslot_bridgeaddr;
-    reg     [31:0]  target_dataslot_length;
-    
+    wire    [15:0]  target_dataslot_id = 16'd0;
+    wire    [31:0]  target_dataslot_slotoffset = 32'd0;
+    wire    [31:0]  target_dataslot_bridgeaddr = 32'd0;
+    wire    [31:0]  target_dataslot_length = 32'd0;
+
     wire    [31:0]  target_buffer_param_struct; // to be mapped/implemented when using some Target commands
     wire    [31:0]  target_buffer_resp_struct;  // to be mapped/implemented when using some Target commands
-    
+
 // bridge data slot access
 // synchronous to clk_74a
 
@@ -420,7 +429,7 @@ core_bridge_cmd icb (
     .bridge_rd_data         ( cmd_bridge_rd_data ),
     .bridge_wr              ( bridge_wr ),
     .bridge_wr_data         ( bridge_wr_data ),
-    
+
     .status_boot_done       ( status_boot_done ),
     .status_setup_done      ( status_setup_done ),
     .status_running         ( status_running ),
@@ -439,14 +448,14 @@ core_bridge_cmd icb (
     .dataslot_update            ( dataslot_update ),
     .dataslot_update_id         ( dataslot_update_id ),
     .dataslot_update_size       ( dataslot_update_size ),
-    
+
     .dataslot_allcomplete   ( dataslot_allcomplete ),
 
     .rtc_epoch_seconds      ( rtc_epoch_seconds ),
     .rtc_date_bcd           ( rtc_date_bcd ),
     .rtc_time_bcd           ( rtc_time_bcd ),
     .rtc_valid              ( rtc_valid ),
-    
+
     .savestate_supported    ( savestate_supported ),
     .savestate_addr         ( savestate_addr ),
     .savestate_size         ( savestate_size ),
@@ -465,12 +474,12 @@ core_bridge_cmd icb (
     .savestate_load_err     ( savestate_load_err ),
 
     .osnotify_inmenu        ( osnotify_inmenu ),
-    
+
     .target_dataslot_read       ( target_dataslot_read ),
     .target_dataslot_write      ( target_dataslot_write ),
     .target_dataslot_getfile    ( target_dataslot_getfile ),
     .target_dataslot_openfile   ( target_dataslot_openfile ),
-    
+
     .target_dataslot_ack        ( target_dataslot_ack ),
     .target_dataslot_done       ( target_dataslot_done ),
     .target_dataslot_err        ( target_dataslot_err ),
@@ -482,7 +491,7 @@ core_bridge_cmd icb (
 
     .target_buffer_param_struct ( target_buffer_param_struct ),
     .target_buffer_resp_struct  ( target_buffer_resp_struct ),
-    
+
     .datatable_addr         ( datatable_addr ),
     .datatable_wren         ( datatable_wren ),
     .datatable_data         ( datatable_data ),
@@ -494,113 +503,306 @@ core_bridge_cmd icb (
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
-
-
-// video generation
-// ~12,288,000 hz pixel clock
 //
-// we want our video mode of 320x240 @ 60hz, this results in 204800 clocks per frame
-// we need to add hblank and vblank times to this, so there will be a nondisplay area. 
-// it can be thought of as a border around the visible area.
-// to make numbers simple, we can have 400 total clocks per line, and 320 visible.
-// dividing 204800 by 400 results in 512 total lines per frame, and 240 visible.
-// this pixel clock is fairly high for the relatively low resolution, but that's fine.
-// PLL output has a minimum output frequency anyway.
+// clocks & resets
+//
+
+    wire    clk_vid;            // 39.6 MHz video
+    wire    clk_vid_90;
+    wire    clk_mem;            // 99 MHz SDRAM controller
+    wire    clk_mem_shifted;    // 99 MHz SDRAM chip clock, 340 deg
+
+    wire    pll_core_locked;
+    wire    pll_core_locked_s;
+synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
+
+pll_imageviewer mp1 (
+    .refclk         ( clk_74a ),
+    .rst            ( 1'b0 ),
+
+    .outclk_0       ( clk_vid ),
+    .outclk_1       ( clk_vid_90 ),
+    .outclk_2       ( clk_mem ),
+    .outclk_3       ( clk_mem_shifted ),
+
+    .locked         ( pll_core_locked )
+);
+
+// resets for the derived domains: held until the PLL is locked and the
+// host has released reset_n
+wire reset_ok_74a = reset_n & pll_core_locked_s;
+wire mem_rst_n, vid_rst_n;
+synch_3 s_mem_rst(reset_ok_74a, mem_rst_n, clk_mem);
+synch_3 s_vid_rst(reset_ok_74a, vid_rst_n, clk_vid);
+
+assign dram_clk = clk_mem_shifted;
 
 
-assign video_rgb_clock = clk_core_12288;
-assign video_rgb_clock_90 = clk_core_12288_90deg;
-assign video_rgb = vidout_rgb;
-assign video_de = vidout_de;
-assign video_skip = vidout_skip;
-assign video_vs = vidout_vs;
-assign video_hs = vidout_hs;
+////////////////////////////////////////////////////////////////////////////////////////
 
-    localparam  VID_V_BPORCH = 'd10;
-    localparam  VID_V_ACTIVE = 'd240;
-    localparam  VID_V_TOTAL = 'd512;
-    localparam  VID_H_BPORCH = 'd10;
-    localparam  VID_H_ACTIVE = 'd320;
-    localparam  VID_H_TOTAL = 'd400;
+//
+// navigation: d-pad left/right switches slots (wraps 0..7)
+//
 
-    reg [15:0]  frame_count;
-    
-    reg [9:0]   x_count;
-    reg [9:0]   y_count;
-    
-    wire [9:0]  visible_x = x_count - VID_H_BPORCH;
-    wire [9:0]  visible_y = y_count - VID_V_BPORCH;
-
-    reg [23:0]  vidout_rgb;
-    reg         vidout_de, vidout_de_1;
-    reg         vidout_skip;
-    reg         vidout_vs;
-    reg         vidout_hs, vidout_hs_1;
-    
-    reg [9:0]   square_x = 'd135;
-    reg [9:0]   square_y = 'd95;
-
-always @(posedge clk_core_12288 or negedge reset_n) begin
-
-    if(~reset_n) begin
-    
-        x_count <= 0;
-        y_count <= 0;
-        
+    reg [2:0] display_slot;
+    reg       nav_left_p, nav_right_p;
+always @(posedge clk_74a or negedge reset_n) begin
+    if (!reset_n) begin
+        display_slot <= 3'd0;
+        nav_left_p   <= 1'b0;
+        nav_right_p  <= 1'b0;
     end else begin
-        vidout_de <= 0;
-        vidout_skip <= 0;
-        vidout_vs <= 0;
-        vidout_hs <= 0;
-        
-        vidout_hs_1 <= vidout_hs;
-        vidout_de_1 <= vidout_de;
-        
-        // x and y counters
-        x_count <= x_count + 1'b1;
-        if(x_count == VID_H_TOTAL-1) begin
-            x_count <= 0;
-            
-            y_count <= y_count + 1'b1;
-            if(y_count == VID_V_TOTAL-1) begin
-                y_count <= 0;
-            end
-        end
-        
-        // generate sync 
-        if(x_count == 0 && y_count == 0) begin
-            // sync signal in back porch
-            // new frame
-            vidout_vs <= 1;
-            frame_count <= frame_count + 1'b1;
-        end
-        
-        // we want HS to occur a bit after VS, not on the same cycle
-        if(x_count == 3) begin
-            // sync signal in back porch
-            // new line
-            vidout_hs <= 1;
-        end
-
-        // inactive screen areas are black
-        vidout_rgb <= 24'h0;
-        // generate active video
-        if(x_count >= VID_H_BPORCH && x_count < VID_H_ACTIVE+VID_H_BPORCH) begin
-
-            if(y_count >= VID_V_BPORCH && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
-                // data enable. this is the active region of the line
-                vidout_de <= 1;
-                
-                vidout_rgb[23:16] <= 8'd60;
-                vidout_rgb[15:8]  <= 8'd60;
-                vidout_rgb[7:0]   <= 8'd60;
-                
-            end 
-        end
+        nav_left_p  <= cont1_key[2];
+        nav_right_p <= cont1_key[3];
+        if (cont1_key[2] && !nav_left_p)
+            display_slot <= (display_slot == 3'd0) ? 3'd7 : display_slot - 3'd1;
+        else if (cont1_key[3] && !nav_right_p)
+            display_slot <= (display_slot == 3'd7) ? 3'd0 : display_slot + 3'd1;
     end
 end
 
 
+////////////////////////////////////////////////////////////////////////////////////////
+
+//
+// slot manager: data slots -> parser input FIFO
+//
+
+    wire [31:0] fifo_in_wr_data;
+    wire        fifo_in_wr_en;
+    wire        fifo_in_wr_full;
+
+    wire        sm_ps_start;
+    wire [2:0]  sm_ps_slot_id;
+    wire [21:0] sm_ps_total_words;
+    wire [1:0]  sm_ps_last_valid;
+    wire        sm_ps_clear_only;
+    wire        sm_ps_ready;
+    wire        sm_ps_done;
+    wire        sm_ps_op_valid;
+
+slot_mgr slot_mgr_inst (
+    .clk                        ( clk_74a ),
+    .rst_n                      ( reset_n ),
+
+    .dataslot_requestwrite      ( dataslot_requestwrite ),
+    .dataslot_requestwrite_id   ( dataslot_requestwrite_id ),
+    .dataslot_requestwrite_size ( dataslot_requestwrite_size ),
+    .dataslot_allcomplete       ( dataslot_allcomplete ),
+    .dataslot_requestwrite_ack  ( dataslot_requestwrite_ack ),
+    .dataslot_requestwrite_ok   ( dataslot_requestwrite_ok ),
+
+    .bridge_addr                ( bridge_addr ),
+    .bridge_wr                  ( bridge_wr ),
+    .bridge_wr_data             ( bridge_wr_data ),
+
+    .fifo_wr_data               ( fifo_in_wr_data ),
+    .fifo_wr_en                 ( fifo_in_wr_en ),
+    .fifo_wr_full               ( fifo_in_wr_full ),
+
+    .mem_clk                    ( clk_mem ),
+    .mem_rst_n                  ( mem_rst_n ),
+    .ps_start                   ( sm_ps_start ),
+    .ps_slot_id                 ( sm_ps_slot_id ),
+    .ps_total_words             ( sm_ps_total_words ),
+    .ps_last_valid              ( sm_ps_last_valid ),
+    .ps_clear_only              ( sm_ps_clear_only ),
+    .ps_ready                   ( sm_ps_ready ),
+    .ps_done                    ( sm_ps_done ),
+    .ps_op_valid                ( sm_ps_op_valid ),
+
+    .slot_valid                 ( slot_valid ),
+    .busy                       (),
+    .fifo_overflow              ( fifo_overflow )
+);
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+//
+// BMP parser: input FIFO -> SDRAM framebuffers
+//
+
+    wire [31:0] fifo_in_rd_data;
+    wire        fifo_in_rd_empty;
+    wire        fifo_in_rd_en;
+
+    wire        p_wr_req;
+    wire [24:0] p_wr_addr;
+    wire [20:0] p_wr_len;
+    wire        p_wr_busy;
+    wire [15:0] p_wr_data;
+    wire        p_wr_valid;
+    wire        p_wr_ready;
+    wire        sdram_init_done;
+
+bmp_parser parser_inst (
+    .clk               ( clk_mem ),
+    .rst_n             ( mem_rst_n ),
+
+    .start             ( sm_ps_start ),
+    .slot_id           ( sm_ps_slot_id ),
+    .total_words       ( sm_ps_total_words ),
+    .last_valid        ( sm_ps_last_valid ),
+    .clear_only        ( sm_ps_clear_only ),
+    .sdram_init_done   ( sdram_init_done ),
+    .ready             ( sm_ps_ready ),
+    .idle              (),
+    .done              ( sm_ps_done ),
+    .op_valid          ( sm_ps_op_valid ),
+
+    .fifo_data         ( fifo_in_rd_data ),
+    .fifo_empty        ( fifo_in_rd_empty ),
+    .fifo_rd           ( fifo_in_rd_en ),
+
+    .wr_req            ( p_wr_req ),
+    .wr_addr           ( p_wr_addr ),
+    .wr_len            ( p_wr_len ),
+    .wr_busy           ( p_wr_busy ),
+    .wr_data           ( p_wr_data ),
+    .wr_valid          ( p_wr_valid ),
+    .wr_ready          ( p_wr_ready )
+);
+
+// parser input FIFO: 16384 x 32 (64 KB)
+async_fifo #(
+    .DATA_W(32),
+    .ADDR_W(14)
+) fifo_in_inst (
+    .wr_clk   ( clk_74a ),
+    .wr_rst_n ( reset_n ),
+    .wr_data  ( fifo_in_wr_data ),
+    .wr_en    ( fifo_in_wr_en ),
+    .wr_full  ( fifo_in_wr_full ),
+    .wr_level (),
+
+    .rd_clk   ( clk_mem ),
+    .rd_rst_n ( mem_rst_n ),
+    .rd_data  ( fifo_in_rd_data ),
+    .rd_en    ( fifo_in_rd_en ),
+    .rd_empty ( fifo_in_rd_empty ),
+    .rd_level ()
+);
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+//
+// SDRAM controller
+//
+
+    wire        v_rd_req;
+    wire [24:0] v_rd_addr;
+    wire [15:0] v_rd_len;
+    wire        v_rd_busy;
+    wire [15:0] v_rd_data;
+    wire        v_rd_valid;
+    wire        v_rd_ready;
+
+sdram_ctrl mem_ctrl_inst (
+    .clk       ( clk_mem ),
+    .rst_n     ( mem_rst_n ),
+
+    .init_done ( sdram_init_done ),
+
+    .wr_req    ( p_wr_req ),
+    .wr_addr   ( p_wr_addr ),
+    .wr_len    ( p_wr_len ),
+    .wr_busy   ( p_wr_busy ),
+    .wr_data   ( p_wr_data ),
+    .wr_valid  ( p_wr_valid ),
+    .wr_ready  ( p_wr_ready ),
+
+    .rd_req    ( v_rd_req ),
+    .rd_addr   ( v_rd_addr ),
+    .rd_len    ( v_rd_len ),
+    .rd_busy   ( v_rd_busy ),
+    .rd_data   ( v_rd_data ),
+    .rd_valid  ( v_rd_valid ),
+    .rd_ready  ( v_rd_ready ),
+
+    .dram_a    ( dram_a ),
+    .dram_ba   ( dram_ba ),
+    .dram_ras_n( dram_ras_n ),
+    .dram_cas_n( dram_cas_n ),
+    .dram_we_n ( dram_we_n ),
+    .dram_dqm  ( dram_dqm ),
+    .dram_cke  ( dram_cke ),
+    .dram_dq   ( dram_dq )
+);
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+//
+// video scanout: SDRAM -> 800x720@60
+//
+
+    wire [31:0] pfifo_wr_data;
+    wire        pfifo_wr_en;
+    wire        pfifo_wr_full;
+    wire [12:0] pfifo_wr_level;
+
+    wire [31:0] pfifo_rd_data;
+    wire        pfifo_rd_empty;
+    wire        pfifo_rd_en;
+
+video_scanout scanout_inst (
+    .mem_clk        ( clk_mem ),
+    .mem_rst_n      ( mem_rst_n ),
+
+    .rd_req         ( v_rd_req ),
+    .rd_addr        ( v_rd_addr ),
+    .rd_len         ( v_rd_len ),
+    .rd_busy        ( v_rd_busy ),
+    .rd_data        ( v_rd_data ),
+    .rd_valid       ( v_rd_valid ),
+    .rd_ready       ( v_rd_ready ),
+
+    .display_slot   ( display_slot ),
+    .slot_valid     ( slot_valid ),
+
+    .pfifo_wr_data  ( pfifo_wr_data ),
+    .pfifo_wr_en    ( pfifo_wr_en ),
+    .pfifo_wr_full  ( pfifo_wr_full ),
+    .pfifo_wr_level ( pfifo_wr_level ),
+
+    .vid_clk        ( clk_vid ),
+    .vid_rst_n      ( vid_rst_n ),
+    .pfifo_rd_data  ( pfifo_rd_data ),
+    .pfifo_rd_empty ( pfifo_rd_empty ),
+    .pfifo_rd_en    ( pfifo_rd_en ),
+
+    .video_rgb      ( video_rgb ),
+    .video_de       ( video_de ),
+    .video_vs       ( video_vs ),
+    .video_hs       ( video_hs ),
+    .video_skip     ( video_skip ),
+    .underrun       ( video_underrun )
+);
+
+assign video_rgb_clock = clk_vid;
+assign video_rgb_clock_90 = clk_vid_90;
+
+// pixel FIFO: 4096 x 32 (16 KB)
+async_fifo #(
+    .DATA_W(32),
+    .ADDR_W(12)
+) pfifo_inst (
+    .wr_clk   ( clk_mem ),
+    .wr_rst_n ( mem_rst_n ),
+    .wr_data  ( pfifo_wr_data ),
+    .wr_en    ( pfifo_wr_en ),
+    .wr_full  ( pfifo_wr_full ),
+    .wr_level ( pfifo_wr_level ),
+
+    .rd_clk   ( clk_vid ),
+    .rd_rst_n ( vid_rst_n ),
+    .rd_data  ( pfifo_rd_data ),
+    .rd_en    ( pfifo_rd_en ),
+    .rd_empty ( pfifo_rd_empty ),
+    .rd_level ()
+);
 
 
 //
@@ -632,10 +834,10 @@ always @(posedge audgen_mclk) begin
     aud_mclk_divider <= aud_mclk_divider + 1'b1;
 end
 
-// shift out audio data as I2S 
+// shift out audio data as I2S
 // 32 total bits per channel, but only 16 active bits at the start and then 16 dummy bits
 //
-    reg     [4:0]   audgen_lrck_cnt;    
+    reg     [4:0]   audgen_lrck_cnt;
     reg             audgen_lrck;
     reg             audgen_dac;
 always @(negedge audgen_sclk) begin
@@ -645,31 +847,9 @@ always @(negedge audgen_sclk) begin
     if(audgen_lrck_cnt == 31) begin
         // switch channels
         audgen_lrck <= ~audgen_lrck;
-        
-    end 
+
+    end
 end
 
 
-///////////////////////////////////////////////
-
-
-    wire    clk_core_12288;
-    wire    clk_core_12288_90deg;
-    
-    wire    pll_core_locked;
-    wire    pll_core_locked_s;
-synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
-
-mf_pllbase mp1 (
-    .refclk         ( clk_74a ),
-    .rst            ( 0 ),
-    
-    .outclk_0       ( clk_core_12288 ),
-    .outclk_1       ( clk_core_12288_90deg ),
-    
-    .locked         ( pll_core_locked )
-);
-
-
-    
 endmodule
