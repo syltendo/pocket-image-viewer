@@ -1,0 +1,15 @@
+# Quartus build outputs
+src/fpga/output_files/
+src/fpga/*.rpt
+src/fpga/*.summary
+src/fpga/*.smsg
+src/fpga/*.done
+src/fpga/*.jdi
+src/fpga/db/
+src/fpga/incremental_db/
+# packaged releases
+dist/*.zip
+# python
+__pycache__/
+# macOS
+.DS_Store

@@ -1,0 +1,1 @@
+{"input":{"controllers":[{"mappings":[{"id":0,"key":"pad_btn_a","name":"Next image (dpad R)"},{"id":1,"key":"pad_btn_b","name":"Prev image (dpad L)"},{"id":2,"key":"pad_btn_start","name":"Reload image"}],"type":"default"}],"magic":"APF_VER_1"}}
