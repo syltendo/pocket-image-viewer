@@ -11,7 +11,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x10000000"
       },
       {
         "id": 1,
@@ -22,7 +23,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x11000000"
       },
       {
         "id": 2,
@@ -33,7 +35,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x12000000"
       },
       {
         "id": 3,
@@ -44,7 +47,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x13000000"
       },
       {
         "id": 4,
@@ -55,7 +59,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x14000000"
       },
       {
         "id": 5,
@@ -66,7 +71,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x15000000"
       },
       {
         "id": 6,
@@ -77,7 +83,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x16000000"
       },
       {
         "id": 7,
@@ -88,7 +95,8 @@
           "bmp"
         ],
         "parameters": 1,
-        "size_maximum": 8388608
+        "size_maximum": 8388608,
+        "address": "0x17000000"
       }
     ]
   }

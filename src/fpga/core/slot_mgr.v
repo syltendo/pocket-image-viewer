@@ -102,9 +102,12 @@ module slot_mgr (
 
     assign busy = (state != ST_IDLE);
     assign fifo_wr_data = bridge_wr_data;
-    // DIAGNOSTIC: route all bridge writes during transfer (no address decode).
-    // If the core loads with this, the data.json address format was the issue.
-    wire route = (state == ST_STREAM) && bridge_wr && !fifo_wr_full;
+    // During an active transfer, the host streams slot data to the slot's
+    // declared address window (data.json: 0x1n000000 for slot n, i.e.
+    // bridge_addr[31:24] == 8'h10 + n). Decode for robustness.
+    wire route = (state == ST_STREAM) && bridge_wr &&
+                 (bridge_addr[31:24] == (8'h10 + {5'd0, cur_slot})) &&
+                 !fifo_wr_full;
     assign fifo_wr_en = route;
 
     // start the parser for the pending request (shared by ST_IDLE)

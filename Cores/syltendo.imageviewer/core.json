@@ -1,1 +1,36 @@
-{"core":{"cores":[{"filename":"bitstream.rbf_r","id":0,"name":"default"}],"framework":{"dock":{"analog_output":false,"supported":true},"hardware":{"cartridge_adapter":-1,"link_port":false},"sleep_supported":false,"target_product":"Analogue Pocket","version_required":"1.1"},"magic":"APF_VER_1","metadata":{"author":"syltendo","date_release":"2026-09-11","description":"Displays BMP images on the Pocket screen. Place a 24-bit BMP at Assets/imageviewer/syltendo.imageviewer/common/image.bmp","platform_ids":["imageviewer"],"shortname":"Image Viewer","url":"https://github.com/syltendo/pocket-image-viewer","version":"0.1.0"}}}
+{
+  "core": {
+    "cores": [
+      {
+        "filename": "bitstream.rbf_r",
+        "id": 0,
+        "name": "default"
+      }
+    ],
+    "framework": {
+      "dock": {
+        "analog_output": false,
+        "supported": true
+      },
+      "hardware": {
+        "cartridge_adapter": -1,
+        "link_port": false
+      },
+      "sleep_supported": false,
+      "target_product": "Analogue Pocket",
+      "version_required": "1.1"
+    },
+    "magic": "APF_VER_1",
+    "metadata": {
+      "author": "syltendo",
+      "date_release": "2026-09-11",
+      "description": "Displays BMP images on the Pocket screen. Place a 24-bit BMP at Assets/imageviewer/syltendo.imageviewer/common/image.bmp",
+      "platform_ids": [
+        "imageviewer"
+      ],
+      "shortname": "imageviewer",
+      "url": "https://github.com/syltendo/pocket-image-viewer",
+      "version": "0.1.0"
+    }
+  }
+}
