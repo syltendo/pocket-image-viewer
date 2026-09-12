@@ -17,7 +17,7 @@
 //
 // Clocking:
 //   clk_74a  - APF framework clock (bridge, slot_mgr, navigation)
-//   clk_mem  - 99 MHz SDRAM controller / parser / scanout read client
+//   clk_mem  - 100 MHz SDRAM controller / parser / scanout read client
 //   clk_vid  - 39.6 MHz video pixel clock
 
 `default_nettype none
@@ -509,8 +509,8 @@ core_bridge_cmd icb (
 
     wire    clk_vid;            // 39.6 MHz video
     wire    clk_vid_90;
-    wire    clk_mem;            // 99 MHz SDRAM controller
-    wire    clk_mem_shifted;    // 99 MHz SDRAM chip clock, 340 deg
+    wire    clk_mem;            // 100 MHz SDRAM controller
+    wire    clk_mem_shifted;    // 100 MHz SDRAM chip clock, 340 deg
 
     wire    pll_core_locked;
     wire    pll_core_locked_s;

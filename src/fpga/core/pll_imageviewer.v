@@ -3,11 +3,15 @@
 // Clock PLL for the Pocket image viewer core.
 // Reference: clk_74a = 74.25 MHz from the APF framework.
 //
-// Outputs (VCO = 792 MHz, fractional-N):
+// Outputs (VCO = 800 MHz, fractional-N):
 //   outclk_0 :  39.6 MHz,   0 ps  - video pixel clock (800x720@60)
 //   outclk_1 :  39.6 MHz, 6313 ps - video pixel clock, 90 deg (scaler capture)
-//   outclk_2 :  99.0 MHz,   0 ps  - SDRAM controller clock
-//   outclk_3 :  99.0 MHz, 7576 ps - SDRAM chip clock (dram_clk), 270 deg
+//   outclk_2 : 100.0 MHz,   0 ps  - SDRAM controller clock
+//   outclk_3 : 100.0 MHz, 7500 ps - SDRAM chip clock (dram_clk), 270 deg
+//
+// Changed from 99 MHz to 100 MHz to match the known-working HarpMudd.mp3player
+// reference design. The 99 MHz PLL config may have been marginal for the SDRAM
+// controller init sequence.
 //
 // The 270-degree shift on dram_clk is the standard SDRAM phase for this
 // setup. NOTE: the optimal phase was not measured with TimeQuest or on
@@ -19,8 +23,8 @@ module pll_imageviewer (
     input  wire rst,
     output wire outclk_0,   // 39.6 MHz video
     output wire outclk_1,   // 39.6 MHz video, 90 deg
-    output wire outclk_2,   // 99 MHz SDRAM controller
-    output wire outclk_3,   // 99 MHz SDRAM chip clock, 340 deg
+    output wire outclk_2,   // 100 MHz SDRAM controller
+    output wire outclk_3,   // 100 MHz SDRAM chip clock, 340 deg
     output wire locked
 );
 
@@ -35,11 +39,11 @@ module pll_imageviewer (
         .output_clock_frequency1("39.6 MHz"),
         .phase_shift1("6313 ps"),
         .duty_cycle1(50),
-        .output_clock_frequency2("99.0 MHz"),
+        .output_clock_frequency2("100.0 MHz"),
         .phase_shift2("0 ps"),
         .duty_cycle2(50),
-        .output_clock_frequency3("99.0 MHz"),
-        .phase_shift3("7576 ps"),
+        .output_clock_frequency3("100.0 MHz"),
+        .phase_shift3("7500 ps"),
         .duty_cycle3(50),
         .pll_type("General"),
         .pll_subtype("General")

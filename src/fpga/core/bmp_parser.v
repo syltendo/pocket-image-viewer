@@ -3,7 +3,7 @@
 // Decodes a 24-bit uncompressed BMP stream straight into an SDRAM
 // framebuffer, with scale-to-fit (aspect preserved, letterboxed).
 //
-// Clock: 99 MHz (same as sdram_ctrl). One pass, no intermediate storage
+// Clock: 100 MHz (same as sdram_ctrl). One pass, no intermediate storage
 // except a single 800-pixel line buffer.
 //
 // Byte order: the APF bridge delivers each 32-bit word big-endian, i.e.

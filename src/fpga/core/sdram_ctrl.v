@@ -1,7 +1,7 @@
 // sdram_ctrl.v
 //
 // SDRAM controller for the Pocket image viewer.
-//   99 MHz controller clock; 16-bit data bus; 13 row bits / 10 col bits /
+//   100 MHz controller clock; 16-bit data bus; 13 row bits / 10 col bits /
 //   2 banks (64 MB). Burst length 8, CAS latency 3, sequential bursts.
 //   Single write port + single read port. Reads are given priority because
 //   video scanout is real-time; writes use the remaining bandwidth.
@@ -34,7 +34,7 @@
 // NOTE: the phase/latency numbers are hand-derived, not measured on hardware.
 
 module sdram_ctrl (
-    input  wire        clk,            // 99 MHz controller clock
+    input  wire        clk,            // 100 MHz controller clock
     input  wire        rst_n,          // synchronous reset, active low
 
     output reg         init_done,
@@ -70,7 +70,7 @@ module sdram_ctrl (
 );
 
     // ------------------------------------------------------------ timing
-    // Conservative, in controller clocks @ 99 MHz (10.1 ns period).
+    // Conservative, in controller clocks @ 100 MHz (10.1 ns period).
     localparam T_RCD      = 3;         // ACTIVATE -> READ/WRITE
     localparam T_RP       = 3;         // PRECHARGE -> ACTIVATE
     localparam T_RFC      = 10;        // REFRESH -> next command
