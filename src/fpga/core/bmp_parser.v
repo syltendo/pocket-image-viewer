@@ -233,7 +233,18 @@ module bmp_parser (
                     sh_avail     <= 3'd0;
                     header_ok    <= 1'b0;
                     idle         <= 1'b0;
-                    state        <= S_CLEAR_REQ;
+                    // Skip the framebuffer clear for normal decodes. The clear
+                    // takes ~116ms during which the Pocket streams data into
+                    // the 128KB FIFO, causing overflow and dropped words. The
+                    // parser then hangs waiting for the dropped data. For a
+                    // full-frame BMP the decode overwrites every pixel anyway.
+                    // Only clear when explicitly blanking (clear_only=1).
+                    if (clear_only)
+                        state <= S_CLEAR_REQ;
+                    else begin
+                        hdr_cnt <= 6'd0;
+                        state   <= S_HDR;
+                    end
                 end
             end
 
