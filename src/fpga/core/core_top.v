@@ -667,7 +667,7 @@ bmp_parser parser_inst (
 // parser input FIFO: 16384 x 32 (64 KB)
 async_fifo #(
     .DATA_W(32),
-    .ADDR_W(14)
+    .ADDR_W(15)   // 32K x 32 = 128KB: absorbs host stream during bkgnd clear
 ) fifo_in_inst (
     .wr_clk   ( clk_74a ),
     .wr_rst_n ( reset_n ),

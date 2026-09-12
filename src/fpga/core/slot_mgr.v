@@ -6,11 +6,12 @@
 //   - Watches dataslot_requestwrite from core_bridge_cmd. In that module
 //     the signal stays high only while the 0x0082 command is being
 //     processed, and the host blocks until we raise
-//     dataslot_requestwrite_ack. We deliberately delay the ACK until the
-//     parser has cleared the slot's framebuffer (parser `ready`), so the
-//     host never streams into an unprepared slot. This also bounds the
-//     input FIFO: once streaming starts the parser consumes at least as
-//     fast as the ~4 MB/s bridge.
+//     dataslot_requestwrite_ack. We ACK IMMEDIATELY (ok=1 for valid
+//     requests) so the bridge never wedges: the host's command handler
+//     is single-threaded, and any delay here (e.g. waiting on SDRAM)
+//     makes the Pocket report "Target not responding". The parser runs
+//     in the background; the input FIFO absorbs the host stream while
+//     the parser clears the framebuffer.
 //   - While a transfer is active, 32-bit bridge writes to the slot's
 //     declared address window (data.json: 0x1n000000 for slot n) are pushed
 //     into the parser's input FIFO, in order. The byte count from [0082]
@@ -66,8 +67,11 @@ module slot_mgr (
 );
 
     // ------------------------------------------------------------ states
+    // NOTE: ST_PREP is retired. We ACK immediately on request (see header);
+    // the parser clear/decode runs in the background. Kept as a state
+    // encoding for clarity but never entered.
     localparam ST_IDLE   = 3'd0,
-               ST_PREP   = 3'd1,   // parser clearing; ACK when ready
+               ST_PREP   = 3'd1,   // (unused) was: wait for parser ready
                ST_ACK    = 3'd2,   // ack held until the host moves on
                ST_STREAM = 3'd3,   // routing bridge writes to the FIFO
                ST_REJECT = 3'd4;   // bad id/size: ack with ok=0
@@ -112,6 +116,9 @@ module slot_mgr (
 
     // start the parser for the pending request (shared by ST_IDLE)
     // NOTE: called only when pending==1; clears pending.
+    // ACKs immediately: the parser start toggle is issued here, but we do
+    // NOT wait for the parser. The host streams into the FIFO while the
+    // parser clears/decodes in the background.
     task start_pending;
     begin
         pending <= 1'b0;
@@ -124,7 +131,10 @@ module slot_mgr (
             pm_last     <= pend_last;
             pm_start_t  <= ~pm_start_t;
             slot_valid[pend_slot] <= 1'b0;   // cleared until decoded
-            state <= ST_PREP;
+            // immediate ACK: don't wait for SDRAM/parser
+            dataslot_requestwrite_ack <= 1'b1;
+            dataslot_requestwrite_ok  <= 1'b1;
+            state <= ST_ACK;
         end
     end
     endtask
@@ -170,14 +180,7 @@ module slot_mgr (
                 if (pending)
                     start_pending;
             end
-            ST_PREP: begin
-                // parser is clearing the framebuffer; ACK when ready
-                if (ready_s) begin
-                    dataslot_requestwrite_ack <= 1'b1;
-                    dataslot_requestwrite_ok  <= 1'b1;
-                    state <= ST_ACK;
-                end
-            end
+            // ST_PREP retired: ACK is immediate, parser runs in background.
             ST_ACK: begin
                 if (!dataslot_requestwrite) begin
                     dataslot_requestwrite_ack <= 1'b0;
