@@ -1,7 +1,7 @@
 // sdram_ctrl.v
 //
 // SDRAM controller for the Pocket image viewer.
-//   100 MHz controller clock; 16-bit data bus; 13 row bits / 10 col bits /
+//   99 MHz controller clock; 16-bit data bus; 13 row bits / 10 col bits /
 //   2 banks (64 MB). Burst length 8, CAS latency 3, sequential bursts.
 //   Single write port + single read port. Reads are given priority because
 //   video scanout is real-time; writes use the remaining bandwidth.
@@ -34,7 +34,7 @@
 // NOTE: the phase/latency numbers are hand-derived, not measured on hardware.
 
 module sdram_ctrl (
-    input  wire        clk,            // 100 MHz controller clock
+    input  wire        clk,            // 99 MHz controller clock
     input  wire        rst_n,          // synchronous reset, active low
 
     output reg         init_done,
@@ -64,13 +64,13 @@ module sdram_ctrl (
     output reg         dram_cas_n,
     output reg         dram_we_n,
     output wire [1:0]  dram_dqm,
-    output wire        dram_cke,
+    output reg         dram_cke,
     inout  wire [15:0] dram_dq
     // NOTE: dram_clk is driven straight from the PLL in core_top.
 );
 
     // ------------------------------------------------------------ timing
-    // Conservative, in controller clocks @ 100 MHz (10.1 ns period).
+    // Conservative, in controller clocks @ 99 MHz (10.1 ns period).
     localparam T_RCD      = 3;         // ACTIVATE -> READ/WRITE
     localparam T_RP       = 3;         // PRECHARGE -> ACTIVATE
     localparam T_RFC      = 10;        // REFRESH -> next command
@@ -224,7 +224,8 @@ module sdram_ctrl (
     reg [1:0]  dqm_q;
     assign dram_dq  = dq_oe ? dq_out : 16'hzzzz;
     assign dram_dqm = dqm_q;
-    assign dram_cke = 1'b1;
+    // CKE low during power-up/reset, driven high when init sequence starts
+    // (matches proven HarpMudd.mp3player SDRAM controller behavior).
 
     reg [2:0] wbit;                    // position inside the write burst
     reg [3:0] rd_gap;                  // spacing between READ commands
@@ -235,6 +236,7 @@ module sdram_ctrl (
             state        <= S_INIT_WAIT;
             timer        <= INIT_WAIT;
             init_done    <= 1'b0;
+            dram_cke     <= 1'b0;  // CKE low during reset/power-up
             open_valid   <= 1'b0;
             wr_dirty     <= 1'b0;
             wr_busy_q    <= 1'b0;
@@ -289,6 +291,7 @@ module sdram_ctrl (
             // ------------------------------------------ init sequence
             S_INIT_WAIT: begin
                 if (timer == 16'd0) begin
+                    dram_cke <= 1'b1;  // Bring CKE high, start init commands
                     dram_ras_n <= 1'b0; dram_cas_n <= 1'b1; dram_we_n <= 1'b0;
                     dram_a[10] <= 1'b1;             // PRECHARGE ALL
                     state <= S_INIT_PRE; timer <= T_RP;
