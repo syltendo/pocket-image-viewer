@@ -105,7 +105,12 @@ module slot_mgr (
     wire done_pulse = done_t_c2 ^ done_t_c3;
 
     assign busy = (state != ST_IDLE);
-    assign fifo_wr_data = bridge_wr_data;
+    // Byte-swap: the Pocket (ARM) writes 32-bit words little-endian, but the
+    // BMP parser consumes bytes MSB-first. Without the swap, the header
+    // appears reversed (e.g. "BM" becomes 0x5E38...), the magic check fails,
+    // slot_valid is never set, and the screen stays black.
+    assign fifo_wr_data = {bridge_wr_data[7:0], bridge_wr_data[15:8],
+                           bridge_wr_data[23:16], bridge_wr_data[31:24]};
     // During an active transfer, the host streams slot data to the slot's
     // declared address window (data.json: 0x1n000000 for slot n, i.e.
     // bridge_addr[31:24] == 8'h10 + n). Decode for robustness.
