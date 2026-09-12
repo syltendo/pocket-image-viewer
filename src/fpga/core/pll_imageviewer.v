@@ -3,7 +3,7 @@
 // Clock PLL for the Pocket image viewer core.
 // Reference: clk_74a = 74.25 MHz from the APF framework.
 //
-// Outputs (VCO = 792 MHz, integer-N):
+// Outputs (VCO = 792 MHz, fractional-N):
 //   outclk_0 :  39.6 MHz,   0 ps  - video pixel clock (800x720@60)
 //   outclk_1 :  39.6 MHz, 6313 ps - video pixel clock, 90 deg (scaler capture)
 //   outclk_2 :  99.0 MHz,   0 ps  - SDRAM controller clock
@@ -25,7 +25,7 @@ module pll_imageviewer (
 );
 
     altera_pll #(
-        .fractional_vco_multiplier("false"),
+        .fractional_vco_multiplier("true"),
         .reference_clock_frequency("74.25 MHz"),
         .operation_mode("normal"),
         .number_of_clocks(4),
