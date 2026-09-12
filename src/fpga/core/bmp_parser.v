@@ -102,6 +102,7 @@ module bmp_parser (
     reg [1:0]  last_valid_q;
     reg        clear_only_q;
     reg [24:0] slot_base;
+    reg        start_latched;   // latch start pulse until SDRAM ready
 
     // ------------------------------------------------------- byte pump
     // 32-bit words arrive MSB-first; bytes are shifted out of `shifter`.
@@ -202,6 +203,7 @@ module bmp_parser (
             fifo_rd   <= 1'b0;
             div_start <= 1'b0;
             lb_we     <= 1'b0;
+            start_latched <= 1'b0;
         end else begin
             done      <= 1'b0;
             fifo_rd   <= 1'b0;
@@ -215,7 +217,13 @@ module bmp_parser (
             S_IDLE: begin
                 idle <= 1'b1;
                 ready <= 1'b0;
-                if (start && sdram_init_done) begin
+                // Latch the start pulse; wait for SDRAM init before proceeding.
+                // Without the latch, a start arriving before sdram_init_done
+                // is missed forever (1-cycle pulse).
+                if (start)
+                    start_latched <= 1'b1;
+                if (start_latched && sdram_init_done) begin
+                    start_latched <= 1'b0;
                     slot_id_q    <= slot_id;
                     total_words_q<= total_words;
                     last_valid_q <= last_valid;
