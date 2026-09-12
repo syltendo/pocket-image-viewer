@@ -24,7 +24,7 @@
     "metadata": {
       "author": "syltendo",
       "date_release": "2026-09-11",
-      "description": "Displays BMP images on the Pocket screen. Place a 24-bit BMP at Assets/imageviewer/syltendo.imageviewer/common/image.bmp",
+      "description": "Displays 24-bit BMP images on the Pocket screen. Place img1.bmp through img8.bmp in Assets/imageviewer/syltendo.imageviewer/common/",
       "platform_ids": [
         "imageviewer"
       ],
