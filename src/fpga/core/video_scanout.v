@@ -66,6 +66,28 @@ module video_scanout (
     // vblank toggle from the vid_clk side (declared here for use below)
     reg vblank_t_vid;
 
+    // DEBUG: sync "slot invalid" flag to vid_clk for red-screen diagnostic.
+    // When the parser rejects the header (slot_valid=0), the video shows
+    // solid red instead of black, proving the video pipeline works.
+    reg slot_invalid_m;
+    always @(posedge mem_clk or negedge mem_rst_n) begin
+        if (!mem_rst_n)
+            slot_invalid_m <= 1'b1;
+        else
+            slot_invalid_m <= ~svalid_m2[dslot_m2];
+    end
+    reg slot_invalid_v1, slot_invalid_v2;
+    always @(posedge vid_clk or negedge vid_rst_n) begin
+        if (!vid_rst_n) begin
+            slot_invalid_v1 <= 1'b1;
+            slot_invalid_v2 <= 1'b1;
+        end else begin
+            slot_invalid_v1 <= slot_invalid_m;
+            slot_invalid_v2 <= slot_invalid_v1;
+        end
+    end
+    wire slot_invalid_vid = slot_invalid_v2;
+
     // ------------------------------------------------- mem_clk: control sync
     reg [2:0] dslot_m1, dslot_m2;
     reg [7:0] svalid_m1, svalid_m2;
@@ -227,7 +249,8 @@ module video_scanout (
                 rgb_q <= {pfifo_rd_data[7:0], pfifo_rd_data[31:24],
                           pfifo_rd_data[23:16]};
             end else begin
-                rgb_q <= 24'd0;   // blanking or FIFO underrun: black
+                // DEBUG: red when slot invalid (parser failed), black otherwise
+                rgb_q <= slot_invalid_vid ? 24'hFF0000 : 24'd0;
             end
 
             // underrun: wanted a pixel but the FIFO was empty
