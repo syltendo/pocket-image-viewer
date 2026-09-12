@@ -535,6 +535,14 @@ wire mem_rst_n, vid_rst_n;
 synch_3 s_mem_rst(reset_ok_74a, mem_rst_n, clk_mem);
 synch_3 s_vid_rst(reset_ok_74a, vid_rst_n, clk_vid);
 
+// Infrastructure reset: released on PLL lock, NOT gated on Pocket's reset_n.
+// The APF boot sequence holds reset_n LOW through the entire data-slot load
+// (0x0011 Reset Exit comes after 0x008F All Complete). The data-loading path
+// (slot_mgr, FIFOs, parser, SDRAM) must be operational during this time,
+// otherwise the 0x0082 ACK can never fire and the Pocket times out.
+wire sys_rst_n_mem;
+synch_3 s_sys_rst_mem(pll_core_locked_s, sys_rst_n_mem, clk_mem);
+
 assign dram_clk = clk_mem_shifted;
 
 
@@ -583,7 +591,7 @@ end
 
 slot_mgr slot_mgr_inst (
     .clk                        ( clk_74a ),
-    .rst_n                      ( reset_n ),
+    .rst_n                      ( pll_core_locked_s ),
 
     .dataslot_requestwrite      ( dataslot_requestwrite ),
     .dataslot_requestwrite_id   ( dataslot_requestwrite_id ),
@@ -638,7 +646,7 @@ slot_mgr slot_mgr_inst (
 
 bmp_parser parser_inst (
     .clk               ( clk_mem ),
-    .rst_n             ( mem_rst_n ),
+    .rst_n             ( sys_rst_n_mem ),
 
     .start             ( sm_ps_start ),
     .slot_id           ( sm_ps_slot_id ),
@@ -670,14 +678,14 @@ async_fifo #(
     .ADDR_W(15)   // 32K x 32 = 128KB: absorbs host stream during bkgnd clear
 ) fifo_in_inst (
     .wr_clk   ( clk_74a ),
-    .wr_rst_n ( reset_n ),
+    .wr_rst_n ( pll_core_locked_s ),
     .wr_data  ( fifo_in_wr_data ),
     .wr_en    ( fifo_in_wr_en ),
     .wr_full  ( fifo_in_wr_full ),
     .wr_level (),
 
     .rd_clk   ( clk_mem ),
-    .rd_rst_n ( mem_rst_n ),
+    .rd_rst_n ( sys_rst_n_mem ),
     .rd_data  ( fifo_in_rd_data ),
     .rd_en    ( fifo_in_rd_en ),
     .rd_empty ( fifo_in_rd_empty ),
@@ -701,7 +709,7 @@ async_fifo #(
 
 sdram_ctrl mem_ctrl_inst (
     .clk       ( clk_mem ),
-    .rst_n     ( mem_rst_n ),
+    .rst_n     ( sys_rst_n_mem ),
 
     .init_done ( sdram_init_done ),
 

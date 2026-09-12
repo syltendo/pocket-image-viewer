@@ -1,1 +1,11 @@
-{"platform":{"category":"Utility","description":"Image Viewer","magic":"APF_VER_1","manufacturer":"syltendo","shortname":"imageviewer","year":2026}}
+{
+  "platform": {
+    "category": "Utility",
+    "description": "Image Viewer",
+    "magic": "APF_VER_1",
+    "manufacturer": "syltendo",
+    "shortname": "imageviewer",
+    "year": 2026,
+    "name": "Image Viewer"
+  }
+}
