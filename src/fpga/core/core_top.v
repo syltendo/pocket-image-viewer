@@ -346,7 +346,12 @@ end
 // bridge host commands
 // synchronous to clk_74a
     wire            status_boot_done = pll_core_locked_s;
-    wire            status_setup_done = pll_core_locked_s; // rising edge triggers a target command
+    // Don't report Setup until SDRAM is initialized. The Pocket sends 0x0082
+    // immediately after seeing Setup; if the parser's start pulse arrives
+    // before sdram_init_done, it's missed and the slot never decodes (black screen).
+    wire            sdram_init_done_74a;
+    synch_3 s_sdram_init_done(sdram_init_done, sdram_init_done_74a, clk_74a);
+    wire            status_setup_done = pll_core_locked_s & sdram_init_done_74a; // rising edge triggers a target command
     wire            status_running = reset_n; // we are running as soon as reset_n goes high
 
     wire            dataslot_requestread;
