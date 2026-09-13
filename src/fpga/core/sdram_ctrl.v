@@ -64,7 +64,7 @@ module sdram_ctrl (
     output reg         dram_cas_n,
     output reg         dram_we_n,
     output wire [1:0]  dram_dqm,
-    output reg         dram_cke,
+    output wire        dram_cke,
     inout  wire [15:0] dram_dq
     // NOTE: dram_clk is driven straight from the PLL in core_top.
 );
@@ -224,8 +224,7 @@ module sdram_ctrl (
     reg [1:0]  dqm_q;
     assign dram_dq  = dq_oe ? dq_out : 16'hzzzz;
     assign dram_dqm = dqm_q;
-    // CKE low during power-up/reset, driven high when init sequence starts
-    // (matches proven HarpMudd.mp3player SDRAM controller behavior).
+    assign dram_cke = 1'b1;  // CKE tied high (matches agg23's proven SNES controller).
 
     reg [2:0] wbit;                    // position inside the write burst
     reg [3:0] rd_gap;                  // spacing between READ commands
@@ -236,7 +235,6 @@ module sdram_ctrl (
             state        <= S_INIT_WAIT;
             timer        <= INIT_WAIT;
             init_done    <= 1'b0;
-            dram_cke     <= 1'b0;  // CKE low during reset/power-up
             open_valid   <= 1'b0;
             wr_dirty     <= 1'b0;
             wr_busy_q    <= 1'b0;
@@ -291,7 +289,6 @@ module sdram_ctrl (
             // ------------------------------------------ init sequence
             S_INIT_WAIT: begin
                 if (timer == 16'd0) begin
-                    dram_cke <= 1'b1;  // Bring CKE high, start init commands
                     dram_ras_n <= 1'b0; dram_cas_n <= 1'b1; dram_we_n <= 1'b0;
                     dram_a[10] <= 1'b1;             // PRECHARGE ALL
                     state <= S_INIT_PRE; timer <= T_RP;
