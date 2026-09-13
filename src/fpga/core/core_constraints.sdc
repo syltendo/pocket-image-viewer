@@ -27,3 +27,14 @@ set_false_path -to [get_registers {*|s_mem_rst|*}]
 set_false_path -to [get_registers {*|s_vid_rst|*}]
 set_false_path -to [get_registers {*|s01|*}]
 set_false_path -to [get_registers {*|s_sys_rst_mem|*}]
+
+# Multicycle paths for SDRAM 180° phase shift (matches agg23's proven design)
+# The SDRAM chip clock (outclk_3) is 180° shifted from the controller clock
+# (outclk_2). This gives 2 cycles of setup margin for signals crossing
+# between the controller and the SDRAM I/O pins.
+# outclk_2 = general[2], 99MHz 0ps (controller)
+# See: https://github.com/agg23/openfpga-SNES/blob/master/target/pocket/core_constraints.sdc
+set_multicycle_path -from {*|mem_ctrl_inst|*} -to [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -start -setup 2
+set_multicycle_path -from {*|mem_ctrl_inst|*} -to [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -start -hold 1
+set_multicycle_path -from [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -to {*|mem_ctrl_inst|*} -setup 2
+set_multicycle_path -from [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -to {*|mem_ctrl_inst|*} -hold 1
