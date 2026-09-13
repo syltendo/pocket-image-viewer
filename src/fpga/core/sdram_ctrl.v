@@ -65,9 +65,12 @@ module sdram_ctrl (
     output reg         dram_we_n,
     output wire [1:0]  dram_dqm,
     output wire        dram_cke,
-    inout  wire [15:0] dram_dq
+    inout  wire [15:0] dram_dq,
     // NOTE: dram_clk is driven straight from the PLL in core_top.
-);
+
+    // ---- diagnostics (mem_clk domain, for video debug colors) ----
+    output reg [31:0]  diag_rd_burst,  // READ bursts issued
+    output reg [31:0]  diag_rd_word);  // words captured to read FIFO
 
     // ------------------------------------------------------------ timing
     // Conservative, in controller clocks @ 99 MHz (10.1 ns period).
@@ -255,6 +258,8 @@ module sdram_ctrl (
             rdf_wr_en    <= 1'b0;
             wbit         <= 3'd0;
             rd_gap       <= 4'd0;
+            diag_rd_burst <= 32'd0;
+            diag_rd_word  <= 32'd0;
         end else begin
             // default: NOP on the bus, no FIFO movement
             dram_ras_n <= 1'b1;
@@ -276,6 +281,10 @@ module sdram_ctrl (
             if (cap_en) begin
                 rdf_wr_data <= dram_dq;
                 rdf_wr_en   <= 1'b1;
+                diag_rd_word <= diag_rd_word + 1'b1;
+            end
+            if (issue_now) begin
+                diag_rd_burst <= diag_rd_burst + 1'b1;
             end
             // (issue_now and fin_pulse can never coincide: READs are >= 8
             // clocks apart and a burst finishes 13 clocks after its issue)

@@ -709,6 +709,9 @@ async_fifo #(
     wire        v_rd_valid;
     wire        v_rd_ready;
 
+    wire [31:0] diag_rd_burst;
+    wire [31:0] diag_rd_word;
+
 sdram_ctrl mem_ctrl_inst (
     .clk       ( clk_mem ),
     .rst_n     ( sys_rst_n_mem ),
@@ -738,7 +741,10 @@ sdram_ctrl mem_ctrl_inst (
     .dram_we_n ( dram_we_n ),
     .dram_dqm  ( dram_dqm ),
     .dram_cke  ( dram_cke ),
-    .dram_dq   ( dram_dq )
+    .dram_dq   ( dram_dq ),
+
+    .diag_rd_burst ( diag_rd_burst ),
+    .diag_rd_word  ( diag_rd_word )
 );
 
 
@@ -773,6 +779,8 @@ video_scanout scanout_inst (
     .slot_valid     ( slot_valid ),
     .sdram_init_done( sdram_init_done ),
     .parser_state   ( parser_debug_state ),
+    .diag_rd_burst  ( diag_rd_burst ),
+    .diag_rd_word   ( diag_rd_word ),
 
     .pfifo_wr_data  ( pfifo_wr_data ),
     .pfifo_wr_en    ( pfifo_wr_en ),

@@ -39,6 +39,8 @@ module video_scanout (
     input  wire [7:0]  slot_valid,     // from slot_mgr (clk_74a)
     input  wire        sdram_init_done, // from SDRAM controller (mem_clk)
     input  wire [4:0]  parser_state,    // DEBUG: parser FSM state (mem_clk)
+    input  wire [31:0] diag_rd_burst,   // DEBUG: SDRAM READ bursts issued (mem_clk)
+    input  wire [31:0] diag_rd_word,    // DEBUG: SDRAM words captured (mem_clk)
 
     // packed-pixel FIFO to vid_clk (mem_clk write side)
     output wire [31:0] pfifo_wr_data,
@@ -112,6 +114,35 @@ module video_scanout (
         end
     end
     wire slot_invalid_vid = slot_invalid_v2;
+
+    // DEBUG: sync SDRAM read diagnostics to vid_clk for color diagnostic.
+    // When slot_valid=1 but the FIFO is empty (black screen), these tell us
+    // where the read path is broken:
+    //   orange = no READ bursts issued (video not requesting / controller stuck)
+    //   purple = READs issued but no data captured (capture timing wrong)
+    //   white  = data captured but FIFO empty (FIFO/drain issue)
+    reg rd_burst_m, rd_word_m;
+    always @(posedge mem_clk or negedge mem_rst_n) begin
+        if (!mem_rst_n) begin
+            rd_burst_m <= 1'b0;
+            rd_word_m  <= 1'b0;
+        end else begin
+            if (diag_rd_burst != 32'd0) rd_burst_m <= 1'b1;
+            if (diag_rd_word  != 32'd0) rd_word_m  <= 1'b1;
+        end
+    end
+    reg rd_burst_v1, rd_burst_v2, rd_word_v1, rd_word_v2;
+    always @(posedge vid_clk or negedge vid_rst_n) begin
+        if (!vid_rst_n) begin
+            rd_burst_v1 <= 1'b0; rd_burst_v2 <= 1'b0;
+            rd_word_v1  <= 1'b0; rd_word_v2  <= 1'b0;
+        end else begin
+            rd_burst_v1 <= rd_burst_m; rd_burst_v2 <= rd_burst_v1;
+            rd_word_v1  <= rd_word_m;  rd_word_v2  <= rd_word_v1;
+        end
+    end
+    wire rd_burst_vid = rd_burst_v2;
+    wire rd_word_vid  = rd_word_v2;
 
     // ------------------------------------------------- mem_clk: control sync
     reg [2:0] dslot_m1, dslot_m2;
@@ -288,8 +319,12 @@ module video_scanout (
                     rgb_q <= 24'h00FF00;  // green: parser in GEOM/pixel/SDRAM write
                 else if (slot_invalid_vid)
                     rgb_q <= 24'hFF0000;  // red: parser failed
+                else if (!rd_burst_vid)
+                    rgb_q <= 24'hFF8000;  // orange: no SDRAM READs issued
+                else if (!rd_word_vid)
+                    rgb_q <= 24'h8000FF;  // purple: READs issued, no data captured
                 else
-                    rgb_q <= 24'd0;       // black
+                    rgb_q <= 24'hFFFFFF;  // white: data captured but FIFO empty
             end
 
             // underrun: wanted a pixel but the FIFO was empty
