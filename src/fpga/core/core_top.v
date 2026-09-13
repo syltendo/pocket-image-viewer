@@ -674,6 +674,110 @@ bmp_parser parser_inst (
     .wr_ready          ( p_wr_ready )
 );
 
+// DIAGNOSTIC: Test pattern generator - writes solid white (0xFFFF) to
+// SDRAM on boot, bypassing the parser. If video shows white, SDRAM
+// writes work. If black, SDRAM write path is broken.
+reg        t_wr_req;
+reg [24:0] t_wr_addr;
+reg [20:0] t_wr_len;
+wire       t_wr_busy;
+reg [15:0] t_wr_data;
+reg        t_wr_valid;
+wire       t_wr_ready;
+
+reg [2:0]  t_state;
+reg [24:0] t_addr;
+localparam T_IDLE = 3'd0, T_REQ = 3'd1, T_DATA = 3'd2, T_WAIT = 3'd3, T_DONE = 3'd4;
+localparam T_TOTAL_WORDS = 25'd1152000;  // 800*720*2 words (16-bit)
+localparam T_CHUNK = 21'd1600;          // words per write request
+
+reg [20:0] t_count;
+
+always @(posedge clk_mem or negedge sys_rst_n_mem) begin
+    if (!sys_rst_n_mem) begin
+        t_state   <= T_IDLE;
+        t_wr_req  <= 1'b0;
+        t_wr_addr <= 25'd0;
+        t_wr_len  <= 21'd0;
+        t_wr_data <= 16'hFFFF;
+        t_wr_valid <= 1'b0;
+        t_addr    <= 25'd0;
+        t_count   <= 21'd0;
+    end else begin
+        case (t_state)
+            T_IDLE: begin
+                if (sdram_init_done) begin
+                    t_addr  <= 25'd0;
+                    t_state <= T_REQ;
+                end
+            end
+            T_REQ: begin
+                // Issue write request for one chunk
+                t_wr_addr <= t_addr;
+                t_wr_len  <= T_CHUNK;
+                t_wr_req  <= 1'b1;
+                t_count   <= 21'd0;
+                t_state   <= T_DATA;
+            end
+            T_DATA: begin
+                // Stream 0xFFFF data words
+                if (t_wr_ready) begin
+                    t_wr_valid <= 1'b1;
+                    t_wr_data  <= 16'hFFFF;
+                    t_count    <= t_count + 1'b1;
+                    if (t_count == T_CHUNK - 1) begin
+                        t_state <= T_WAIT;
+                    end
+                end else begin
+                    t_wr_valid <= 1'b0;
+                end
+            end
+            T_WAIT: begin
+                t_wr_valid <= 1'b0;
+                t_wr_req   <= 1'b0;
+                if (!t_wr_busy) begin
+                    // Move to next chunk
+                    if (t_addr + T_CHUNK >= T_TOTAL_WORDS) begin
+                        t_state <= T_DONE;
+                    end else begin
+                        t_addr  <= t_addr + T_CHUNK;
+                        t_state <= T_REQ;
+                    end
+                end
+            end
+            T_DONE: begin
+                // Stay here; video will display the white framebuffer
+                t_wr_req   <= 1'b0;
+                t_wr_valid <= 1'b0;
+            end
+            default: t_state <= T_IDLE;
+        endcase
+    end
+end
+
+// Mux: test pattern takes over SDRAM write port (parser is idle in test mode)
+// For this diagnostic, we ALWAYS use test pattern (parser start is gated)
+wire test_mode_active = 1'b1;
+
+wire        mux_wr_req;
+wire [24:0] mux_wr_addr;
+wire [20:0] mux_wr_len;
+wire        mux_wr_busy;
+wire [15:0] mux_wr_data;
+wire        mux_wr_valid;
+wire        mux_wr_ready;
+
+assign mux_wr_req   = test_mode_active ? t_wr_req   : p_wr_req;
+assign mux_wr_addr  = test_mode_active ? t_wr_addr  : p_wr_addr;
+assign mux_wr_len   = test_mode_active ? t_wr_len   : p_wr_len;
+assign mux_wr_data  = test_mode_active ? t_wr_data  : p_wr_data;
+assign mux_wr_valid = test_mode_active ? t_wr_valid : p_wr_valid;
+// Backpressure returns to the active source
+assign t_wr_busy = mux_wr_busy;
+assign t_wr_ready = mux_wr_ready;
+assign p_wr_busy = test_mode_active ? 1'b0 : mux_wr_busy;
+assign p_wr_ready = test_mode_active ? 1'b0 : mux_wr_ready;
+
 // parser input FIFO: 16384 x 32 (64 KB)
 async_fifo #(
     .DATA_W(32),
@@ -720,13 +824,13 @@ sdram_ctrl mem_ctrl_inst (
 
     .init_done ( sdram_init_done ),
 
-    .wr_req    ( p_wr_req ),
-    .wr_addr   ( p_wr_addr ),
-    .wr_len    ( p_wr_len ),
-    .wr_busy   ( p_wr_busy ),
-    .wr_data   ( p_wr_data ),
-    .wr_valid  ( p_wr_valid ),
-    .wr_ready  ( p_wr_ready ),
+    .wr_req    ( mux_wr_req ),
+    .wr_addr   ( mux_wr_addr ),
+    .wr_len    ( mux_wr_len ),
+    .wr_busy   ( mux_wr_busy ),
+    .wr_data   ( mux_wr_data ),
+    .wr_valid  ( mux_wr_valid ),
+    .wr_ready  ( mux_wr_ready ),
 
     .rd_req    ( v_rd_req ),
     .rd_addr   ( v_rd_addr ),
@@ -780,7 +884,7 @@ video_scanout scanout_inst (
     .rd_ready       ( v_rd_ready ),
 
     .display_slot   ( display_slot ),
-    .slot_valid     ( slot_valid ),
+    .slot_valid     ( test_mode_active ? 8'b00000001 : slot_valid ),
     .sdram_init_done( sdram_init_done ),
     .parser_state   ( parser_debug_state ),
     .diag_rd_burst  ( diag_rd_burst ),
