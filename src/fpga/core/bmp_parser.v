@@ -346,6 +346,7 @@ module bmp_parser (
 
             // ------------------------------- scale = min(800/W, 720/H)
             S_DIV0W: begin
+                div_start <= 1'b0;  // clear start pulse (was held high, restarting divider)
                 if (div_done) begin
                     q0        <= div_q[25:0];
                     div_num   <= 32'd720 << 16;
@@ -355,6 +356,7 @@ module bmp_parser (
                 end
             end
             S_DIV1W: begin
+                div_start <= 1'b0;  // clear start pulse
                 if (div_done) begin
                     q1    <= div_q[25:0];
                     state <= S_GEOM;
