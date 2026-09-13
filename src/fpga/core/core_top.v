@@ -769,6 +769,7 @@ video_scanout scanout_inst (
 
     .display_slot   ( display_slot ),
     .slot_valid     ( slot_valid ),
+    .sdram_init_done( sdram_init_done ),
 
     .pfifo_wr_data  ( pfifo_wr_data ),
     .pfifo_wr_en    ( pfifo_wr_en ),

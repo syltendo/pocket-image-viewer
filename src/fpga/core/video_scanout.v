@@ -37,6 +37,7 @@ module video_scanout (
     // async control in (synchronized inside to mem_clk)
     input  wire [2:0]  display_slot,   // from navigation (clk_74a)
     input  wire [7:0]  slot_valid,     // from slot_mgr (clk_74a)
+    input  wire        sdram_init_done, // from SDRAM controller (mem_clk)
 
     // packed-pixel FIFO to vid_clk (mem_clk write side)
     output wire [31:0] pfifo_wr_data,
@@ -69,6 +70,7 @@ module video_scanout (
     // DEBUG: sync "slot invalid" flag to vid_clk for red-screen diagnostic.
     // When the parser rejects the header (slot_valid=0), the video shows
     // solid red instead of black, proving the video pipeline works.
+    // Blue = SDRAM init not done, Red = init done but parser failed.
     reg slot_invalid_m;
     always @(posedge mem_clk or negedge mem_rst_n) begin
         if (!mem_rst_n)
@@ -76,6 +78,17 @@ module video_scanout (
         else
             slot_invalid_m <= ~svalid_m2[dslot_m2];
     end
+    reg init_done_v1, init_done_v2;
+    always @(posedge vid_clk or negedge vid_rst_n) begin
+        if (!vid_rst_n) begin
+            init_done_v1 <= 1'b0;
+            init_done_v2 <= 1'b0;
+        end else begin
+            init_done_v1 <= sdram_init_done;
+            init_done_v2 <= init_done_v1;
+        end
+    end
+    wire init_done_vid = init_done_v2;
     reg slot_invalid_v1, slot_invalid_v2;
     always @(posedge vid_clk or negedge vid_rst_n) begin
         if (!vid_rst_n) begin
@@ -249,8 +262,8 @@ module video_scanout (
                 rgb_q <= {pfifo_rd_data[7:0], pfifo_rd_data[31:24],
                           pfifo_rd_data[23:16]};
             end else begin
-                // DEBUG: red when slot invalid (parser failed), black otherwise
-                rgb_q <= slot_invalid_vid ? 24'hFF0000 : 24'd0;
+                // DEBUG: blue = SDRAM init not done, red = init done but slot invalid
+                rgb_q <= !init_done_vid ? 24'h0000FF : (slot_invalid_vid ? 24'hFF0000 : 24'd0);
             end
 
             // underrun: wanted a pixel but the FIFO was empty
