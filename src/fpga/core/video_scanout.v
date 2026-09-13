@@ -38,6 +38,7 @@ module video_scanout (
     input  wire [2:0]  display_slot,   // from navigation (clk_74a)
     input  wire [7:0]  slot_valid,     // from slot_mgr (clk_74a)
     input  wire        sdram_init_done, // from SDRAM controller (mem_clk)
+    input  wire [4:0]  parser_state,    // DEBUG: parser FSM state (mem_clk)
 
     // packed-pixel FIFO to vid_clk (mem_clk write side)
     output wire [31:0] pfifo_wr_data,
@@ -89,6 +90,17 @@ module video_scanout (
         end
     end
     wire init_done_vid = init_done_v2;
+    reg [4:0] pstate_v1, pstate_v2;
+    always @(posedge vid_clk or negedge vid_rst_n) begin
+        if (!vid_rst_n) begin
+            pstate_v1 <= 5'd0;
+            pstate_v2 <= 5'd0;
+        end else begin
+            pstate_v1 <= parser_state;
+            pstate_v2 <= pstate_v1;
+        end
+    end
+    wire [4:0] pstate_vid = pstate_v2;
     reg slot_invalid_v1, slot_invalid_v2;
     always @(posedge vid_clk or negedge vid_rst_n) begin
         if (!vid_rst_n) begin
@@ -262,8 +274,20 @@ module video_scanout (
                 rgb_q <= {pfifo_rd_data[7:0], pfifo_rd_data[31:24],
                           pfifo_rd_data[23:16]};
             end else begin
-                // DEBUG: blue = SDRAM init not done, red = init done but slot invalid
-                rgb_q <= !init_done_vid ? 24'h0000FF : (slot_invalid_vid ? 24'hFF0000 : 24'd0);
+                // DEBUG colors: blue=SDRAM init stuck, cyan=parser idle,
+                // yellow=reading header, green=writing pixels, red=parser failed
+                if (!init_done_vid)
+                    rgb_q <= 24'h0000FF;  // blue: SDRAM init not done
+                else if (pstate_vid == 5'd0)
+                    rgb_q <= 24'h00FFFF;  // cyan: parser in IDLE (no start)
+                else if (pstate_vid == 5'd4)
+                    rgb_q <= 24'hFFFF00;  // yellow: parser in HDR (reading header)
+                else if (pstate_vid >= 5'd11 && pstate_vid <= 5'd14)
+                    rgb_q <= 24'h00FF00;  // green: parser writing pixels
+                else if (slot_invalid_vid)
+                    rgb_q <= 24'hFF0000;  // red: parser failed
+                else
+                    rgb_q <= 24'd0;       // black
             end
 
             // underrun: wanted a pixel but the FIFO was empty

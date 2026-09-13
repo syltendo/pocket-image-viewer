@@ -43,6 +43,7 @@ module bmp_parser (
     output reg         idle,               // 1: no operation in progress
     output reg         done,               // 1-cycle pulse
     output reg         op_valid,           // valid together with done
+    output wire [4:0]  debug_state,        // DEBUG: current FSM state
 
     // ---- word stream in (MSB-first bytes) ----
     input  wire [31:0] fifo_data,
@@ -95,6 +96,7 @@ module bmp_parser (
                S_FETCH       = 5'd24;
 
     reg [4:0] state, ret_state;
+    assign debug_state = state;
 
     // ------------------------------------------------------- latched params
     reg [2:0]  slot_id_q;

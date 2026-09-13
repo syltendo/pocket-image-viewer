@@ -588,6 +588,7 @@ end
     wire        sm_ps_ready;
     wire        sm_ps_done;
     wire        sm_ps_op_valid;
+    wire [4:0]  parser_debug_state;
 
 slot_mgr slot_mgr_inst (
     .clk                        ( clk_74a ),
@@ -658,6 +659,7 @@ bmp_parser parser_inst (
     .idle              (),
     .done              ( sm_ps_done ),
     .op_valid          ( sm_ps_op_valid ),
+    .debug_state       ( parser_debug_state ),
 
     .fifo_data         ( fifo_in_rd_data ),
     .fifo_empty        ( fifo_in_rd_empty ),
@@ -770,6 +772,7 @@ video_scanout scanout_inst (
     .display_slot   ( display_slot ),
     .slot_valid     ( slot_valid ),
     .sdram_init_done( sdram_init_done ),
+    .parser_state   ( parser_debug_state ),
 
     .pfifo_wr_data  ( pfifo_wr_data ),
     .pfifo_wr_en    ( pfifo_wr_en ),
