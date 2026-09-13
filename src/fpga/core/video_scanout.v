@@ -275,15 +275,17 @@ module video_scanout (
                           pfifo_rd_data[23:16]};
             end else begin
                 // DEBUG colors: blue=SDRAM init stuck, cyan=parser idle,
-                // yellow=reading header, green=writing pixels, red=parser failed
+                // yellow=header, magenta=divider, green=geom/pixel/SDRAM write, red=failed
                 if (!init_done_vid)
                     rgb_q <= 24'h0000FF;  // blue: SDRAM init not done
                 else if (pstate_vid == 5'd0)
                     rgb_q <= 24'h00FFFF;  // cyan: parser in IDLE (no start)
                 else if (pstate_vid == 5'd4)
                     rgb_q <= 24'hFFFF00;  // yellow: parser in HDR (reading header)
-                else if (pstate_vid >= 5'd11 && pstate_vid <= 5'd14)
-                    rgb_q <= 24'h00FF00;  // green: parser writing pixels
+                else if (pstate_vid >= 5'd5 && pstate_vid <= 5'd7)
+                    rgb_q <= 24'hFF00FF;  // magenta: parser in DIV (divider wait)
+                else if ((pstate_vid >= 5'd8 && pstate_vid <= 5'd23) || pstate_vid == 5'd25)
+                    rgb_q <= 24'h00FF00;  // green: parser in GEOM/pixel/SDRAM write
                 else if (slot_invalid_vid)
                     rgb_q <= 24'hFF0000;  // red: parser failed
                 else
