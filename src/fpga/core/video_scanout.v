@@ -41,6 +41,8 @@ module video_scanout (
     input  wire [4:0]  parser_state,    // DEBUG: parser FSM state (mem_clk)
     input  wire [31:0] diag_rd_burst,   // DEBUG: SDRAM READ bursts issued (mem_clk)
     input  wire [31:0] diag_rd_word,    // DEBUG: SDRAM words captured (mem_clk)
+    input  wire [31:0] diag_wr_burst,   // DEBUG: SDRAM WRITE bursts issued (mem_clk)
+    input  wire [31:0] diag_wr_word,    // DEBUG: SDRAM words written (mem_clk)
 
     // packed-pixel FIFO to vid_clk (mem_clk write side)
     output wire [31:0] pfifo_wr_data,
@@ -131,6 +133,15 @@ module video_scanout (
             if (diag_rd_word  != 32'd0) rd_word_m  <= 1'b1;
         end
     end
+    // DEBUG: did the SDRAM controller issue any WRITE bursts?
+    reg wr_burst_m;
+    always @(posedge mem_clk or negedge mem_rst_n) begin
+        if (!mem_rst_n) begin
+            wr_burst_m <= 1'b0;
+        end else begin
+            if (diag_wr_burst != 32'd0) wr_burst_m <= 1'b1;
+        end
+    end
     reg rd_burst_v1, rd_burst_v2, rd_word_v1, rd_word_v2;
     always @(posedge vid_clk or negedge vid_rst_n) begin
         if (!vid_rst_n) begin
@@ -143,6 +154,15 @@ module video_scanout (
     end
     wire rd_burst_vid = rd_burst_v2;
     wire rd_word_vid  = rd_word_v2;
+    reg wr_burst_v1, wr_burst_v2;
+    always @(posedge vid_clk or negedge vid_rst_n) begin
+        if (!vid_rst_n) begin
+            wr_burst_v1 <= 1'b0; wr_burst_v2 <= 1'b0;
+        end else begin
+            wr_burst_v1 <= wr_burst_m; wr_burst_v2 <= wr_burst_v1;
+        end
+    end
+    wire wr_burst_vid = wr_burst_v2;
 
     // ------------------------------------------------- mem_clk: control sync
     reg [2:0] dslot_m1, dslot_m2;
@@ -302,8 +322,16 @@ module video_scanout (
             // rd_en_q doubles as the "data valid next cycle" flag.
             rd_en_q <= (hpos < H_ACTIVE) && (vpos < V_ACTIVE) && !pfifo_rd_empty;
             if (rd_en_q) begin
-                rgb_q <= {pfifo_rd_data[7:0], pfifo_rd_data[31:24],
-                          pfifo_rd_data[23:16]};
+                // DEBUG: if FIFO data is all zeros and slot is valid, the
+                // SDRAM returned zeros. Distinguish "no writes happened"
+                // (dark red) from "writes happened but data lost" (black).
+                if ({pfifo_rd_data[7:0], pfifo_rd_data[31:24],
+                     pfifo_rd_data[23:16]} == 24'd0 &&
+                    init_done_vid && !slot_invalid_vid)
+                    rgb_q <= wr_burst_vid ? 24'h000000 : 24'h800000;
+                else
+                    rgb_q <= {pfifo_rd_data[7:0], pfifo_rd_data[31:24],
+                              pfifo_rd_data[23:16]};
             end else begin
                 // DEBUG colors: blue=SDRAM init stuck, cyan=parser idle,
                 // yellow=header, magenta=divider, green=geom/pixel/SDRAM write, red=failed

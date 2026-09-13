@@ -70,7 +70,9 @@ module sdram_ctrl (
 
     // ---- diagnostics (mem_clk domain, for video debug colors) ----
     output reg [31:0]  diag_rd_burst,  // READ bursts issued
-    output reg [31:0]  diag_rd_word);  // words captured to read FIFO
+    output reg [31:0]  diag_rd_word,   // words captured to read FIFO
+    output reg [31:0]  diag_wr_burst,  // WRITE bursts issued
+    output reg [31:0]  diag_wr_word);  // words written to SDRAM
 
     // ------------------------------------------------------------ timing
     // Conservative, in controller clocks @ 99 MHz (10.1 ns period).
@@ -260,6 +262,8 @@ module sdram_ctrl (
             rd_gap       <= 4'd0;
             diag_rd_burst <= 32'd0;
             diag_rd_word  <= 32'd0;
+            diag_wr_burst <= 32'd0;
+            diag_wr_word  <= 32'd0;
         end else begin
             // default: NOP on the bus, no FIFO movement
             dram_ras_n <= 1'b1;
@@ -400,6 +404,7 @@ module sdram_ctrl (
                     dram_ba <= b_bank;
                     dram_a  <= {3'd0, b_col_aligned}; // A10=0: no auto-precharge
                     wbit    <= 3'd0;
+                    diag_wr_burst <= diag_wr_burst + 1'b1;
                     state   <= S_WR_DATA;
                 end
                 // else: wait for the writer to stream more words
@@ -411,6 +416,7 @@ module sdram_ctrl (
                 if (!b_mask[wbit]) begin
                     dq_out    <= wrf_out;
                     wrf_rd_en <= 1'b1;
+                    diag_wr_word <= diag_wr_word + 1'b1;
                 end else begin
                     dq_out <= 16'd0;
                 end
