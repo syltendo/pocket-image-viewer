@@ -509,8 +509,7 @@ core_bridge_cmd icb (
 
     wire    clk_vid;            // 39.6 MHz video
     wire    clk_vid_90;
-    wire    clk_mem;            // 100 MHz SDRAM controller
-    wire    clk_mem_shifted;    // 99 MHz SDRAM chip clock, 180 deg
+    wire    clk_mem;            // 99 MHz SDRAM controller
 
     wire    pll_core_locked;
     wire    pll_core_locked_s;
@@ -523,7 +522,6 @@ pll_imageviewer mp1 (
     .outclk_0       ( clk_vid ),
     .outclk_1       ( clk_vid_90 ),
     .outclk_2       ( clk_mem ),
-    .outclk_3       ( clk_mem_shifted ),
 
     .locked         ( pll_core_locked )
 );
@@ -543,7 +541,18 @@ synch_3 s_vid_rst(reset_ok_74a, vid_rst_n, clk_vid);
 wire sys_rst_n_mem;
 synch_3 s_sys_rst_mem(pll_core_locked_s, sys_rst_n_mem, clk_mem);
 
-assign dram_clk = clk_mem_shifted;
+// dram_clk: generated via ALTDDIO_OUT off clk_mem (same clock that drives
+// dram_a/dram_dq/dram_dqm/commands in sdram_ctrl.v), matching agg23's proven
+// SDRAM controllers. datain_h=0, datain_l=1 gives a clean 180-degree shift
+// relative to clk_mem with a Quartus-characterized, same-clock-domain Tco
+// instead of the skew between two independent, STA-unrelated PLL taps.
+// See pll_imageviewer.v for why the previous outclk_3 approach was unsound.
+pin_ddio_clk dram_clk_ddio (
+    .datain_h ( 1'b0 ),
+    .datain_l ( 1'b1 ),
+    .outclock ( clk_mem ),
+    .dataout  ( dram_clk )
+);
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
