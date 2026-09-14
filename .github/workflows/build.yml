@@ -27,6 +27,16 @@ jobs:
             raetro/quartus:21.1.1 \
             bash -c 'quartus_sh --flow compile ap_core'
 
+      - name: Dump worst setup/hold timing paths (clk_mem)
+        # The standard compile's ap_core.sta.rpt only has summary slack/TNS
+        # per clock, not the named critical path. report_worst_paths.tcl
+        # runs report_timing directly so we get the actual failing path.
+        run: |
+          docker run --rm \
+            -v "$PWD:/build" -w /build/src/fpga \
+            raetro/quartus:21.1.1 \
+            bash -c 'quartus_sta -t report_worst_paths.tcl ap_core'
+
       - name: Convert RBF to bitstream.rbf_r
         run: |
           python3 tools/rbf_to_rbf_r.py \
