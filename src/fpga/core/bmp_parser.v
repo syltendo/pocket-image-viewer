@@ -152,6 +152,12 @@ module bmp_parser (
     reg [31:0] pad_left;
     reg [23:0] px_w;                      // pixel being written (2 words)
 
+    // pipeline registers for the per-pixel c_dx0/c_dx1 mapping (used in
+    // S_PIXEL/S_FILL below) -- same fix shape as S_GEOM's pipeline, but
+    // per-pixel instead of per-image; see the comment at S_PIXEL.
+    reg [9:0]  mul_c0_hi_r, mul_c1_hi_r;  // registered col*scale / (col+1)*scale, bits [25:16]
+    reg [10:0] dx0_r, dx1_r;              // registered c_dx0/c_dx1
+
     // scale multiplies (13b x 26b). The results used are < 800 / < 720,
     // so bits [25:16] carry the value; the 11-bit sums cannot overflow
     // past 800/720 (see derivation in docs/architecture.md).
@@ -159,8 +165,11 @@ module bmp_parser (
     wire [38:0] mul_c1 = (col + 13'd1) * scale;
     wire [38:0] mul_r0 = src_row * scale;
     wire [38:0] mul_r1 = (src_row + 13'd1) * scale;
-    wire [10:0] c_dx0 = {1'b0, x0} + mul_c0[25:16];
-    wire [10:0] c_dx1 = {1'b0, x0} + mul_c1[25:16];
+    // c_dx0/c_dx1 (the col-side mapping) used to be continuous wires here;
+    // they're now pipelined into dx0_r/dx1_r above (see S_PIXEL) since that
+    // combinational chain was clk_mem's worst timing violation. c_dy0/c_dy1
+    // (the once-per-row src_row-side mapping) are unchanged -- they weren't
+    // implicated in any of the reported violations.
     wire [10:0] c_dy0 = {1'b0, y0} + mul_r0[25:16];
     wire [10:0] c_dy1 = {1'b0, y0} + mul_r1[25:16];
 
@@ -447,7 +456,23 @@ module bmp_parser (
             end
 
             // --------------------------------- pixel bytes (B,G,R)
+            // The col -> c_dx0/c_dx1 mapping (scale multiply + x0 add) is
+            // pipelined across the 3 existing byte-shift cycles of this
+            // state instead of computed combinationally in one cycle: the
+            // worst_setup_paths.rpt after the S_GEOM fix showed this exact
+            // chain (col(reg) -> multiply -> add -> compare -> state mux)
+            // was the new worst clk_mem violation (-1.12ns, all 40 worst
+            // paths) -- same shape as S_GEOM but per-pixel instead of
+            // per-image. col is stable for all 3 bytes of S_PIXEL, so
+            // registering the multiply on byte 0->1 and the add on byte
+            // 1->2 is free: dx0_r/dx1_r are valid well before they're read
+            // at byte 2 (or during S_FILL, which runs strictly after).
             S_PIXEL: begin
+                mul_c0_hi_r <= mul_c0[25:16];
+                mul_c1_hi_r <= mul_c1[25:16];
+                dx0_r <= {1'b0, x0} + {1'b0, mul_c0_hi_r};
+                dx1_r <= {1'b0, x0} + {1'b0, mul_c1_hi_r};
+
                 if (no_more_data) begin
                     state <= S_FINISH;
                 end else if (sh_avail != 3'd0) begin
@@ -459,11 +484,13 @@ module bmp_parser (
                     shifter  <= {shifter[23:0], 8'd0};
                     sh_avail <= sh_avail - 3'd1;
                     if (px_byte == 2'd2) begin
-                        // fill linebuf[c_dx0 .. c_dx1)
-                        if (c_dx0 == c_dx1) begin
+                        // fill linebuf[dx0_r .. dx1_r) -- pipelined values;
+                        // correct since col hasn't moved since S_PIXEL was
+                        // entered (see comment above).
+                        if (dx0_r == dx1_r) begin
                             state <= S_PIXELNEXT;  // downscaled away
                         end else begin
-                            k     <= c_dx0[9:0];
+                            k     <= dx0_r[9:0];
                             state <= S_FILL;
                         end
                         px_byte <= 2'd0;
@@ -482,7 +509,9 @@ module bmp_parser (
                 lb_we    <= 1'b1;
                 lb_waddr <= k;
                 lb_wdata <= px;
-                if (k + 10'd1 == c_dx1) begin
+                // dx1_r (pipelined in S_PIXEL, see above) instead of
+                // recomputing c_dx1 combinationally here too.
+                if (k + 10'd1 == dx1_r) begin
                     state <= S_PIXELNEXT;
                 end else begin
                     k <= k + 10'd1;
