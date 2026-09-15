@@ -82,6 +82,7 @@ module bmp_parser (
                S_SKIP        = 5'd9,
                S_ROWINIT     = 5'd10,
                S_ROWINIT2    = 5'd25,
+               S_ROWINIT3    = 5'd28,
                S_PIXEL       = 5'd11,
                S_FILL        = 5'd12,
                S_PIXELNEXT   = 5'd13,
@@ -166,12 +167,14 @@ module bmp_parser (
     wire [38:0] mul_r0 = src_row * scale;
     wire [38:0] mul_r1 = (src_row + 13'd1) * scale;
     // c_dx0/c_dx1 (the col-side mapping) used to be continuous wires here;
-    // they're now pipelined into dx0_r/dx1_r above (see S_PIXEL) since that
+    // they're now pipelined into dx0_r/dx1_r (see S_PIXEL) since that
     // combinational chain was clk_mem's worst timing violation. c_dy0/c_dy1
-    // (the once-per-row src_row-side mapping) are unchanged -- they weren't
-    // implicated in any of the reported violations.
-    wire [10:0] c_dy0 = {1'b0, y0} + mul_r0[25:16];
-    wire [10:0] c_dy1 = {1'b0, y0} + mul_r1[25:16];
+    // (the once-per-row src_row-side mapping) had the same problem once the
+    // col-side chain was fixed -- it was the next worst violation -- so it's
+    // now pipelined the same way into dy0_p/dy1_p (see S_ROWINIT2/S_ROWINIT3).
+    reg  [9:0]  mul_r0_hi_r, mul_r1_hi_r; // registered src_row*scale / (src_row+1)*scale, bits [25:16]
+    wire [10:0] dy0_p = {1'b0, y0} + {1'b0, mul_r0_hi_r};
+    wire [10:0] dy1_p = {1'b0, y0} + {1'b0, mul_r1_hi_r};
 
     // ------------------------------------------------------- line buffer
     // 800 x 24 block RAM, true dual port (write: fill, read: row write).
@@ -435,8 +438,11 @@ module bmp_parser (
                 if (row == img_h) begin
                     state <= S_DRAIN;
                 end else begin
-                    // NOTE: c_dy0/c_dy1 use src_row, which settles next
-                    // cycle; the row geometry is latched in S_ROWINIT2.
+                    // NOTE: mul_r0/mul_r1 use src_row, which settles next
+                    // cycle; the row geometry is pipelined across
+                    // S_ROWINIT2/S_ROWINIT3 below (same fix shape as the
+                    // per-pixel S_PIXEL pipeline -- this was clk_mem's next
+                    // worst violation once the per-pixel one was fixed).
                     src_row <= top_down ? row : (img_h - 13'd1 - row);
                     col     <= 13'd0;
                     px_byte <= 2'd0;
@@ -444,9 +450,18 @@ module bmp_parser (
                 end
             end
             S_ROWINIT2: begin
-                dy0 <= c_dy0[9:0];
-                dy1 <= c_dy1[9:0];
-                if (c_dy0 == c_dy1) begin
+                // stage 1: register the multiply only (src_row is already
+                // stable, set one cycle ago in S_ROWINIT).
+                mul_r0_hi_r <= mul_r0[25:16];
+                mul_r1_hi_r <= mul_r1[25:16];
+                state <= S_ROWINIT3;
+            end
+            S_ROWINIT3: begin
+                // stage 2: add + compare only, from the registered
+                // multiply -- cheap, fits comfortably in one cycle.
+                dy0 <= dy0_p[9:0];
+                dy1 <= dy1_p[9:0];
+                if (dy0_p == dy1_p) begin
                     // this source row maps to no dest rows: skip it
                     pad_left <= stride;
                     state    <= S_SKIPROW;
