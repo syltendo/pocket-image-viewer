@@ -171,7 +171,7 @@ module sdram_ctrl (
     wire [6:0] wrf_level = wrf_wr - wrf_rd;
     wire       wrf_full  = (wrf_level == 7'd64);
     wire       wrf_empty = (wrf_level == 7'd0);
-    reg        wrf_rd_en;
+    wire       wrf_rd_en;
     wire [15:0] wrf_out = wrf_mem[wrf_rd[5:0]];
     assign wr_ready = !wrf_full;
 
@@ -246,14 +246,47 @@ module sdram_ctrl (
     assign rd_busy = rd_busy_q;
 
     // ------------------------------------------------------- DQ / DQM
-    reg        dq_oe;
-    reg [15:0] dq_out;
-    reg [1:0]  dqm_q;
+    reg [2:0] wbit;                    // position inside the write burst
+
+    // dq_oe/dq_out/dqm_q/wrf_rd_en are combinational, not registered. They
+    // were originally `<= ` (registered) here, one cycle behind `state`
+    // and `wbit` -- but the WRITE command (dram_ras_n/cas_n/we_n/dram_a)
+    // is ALSO a registered output, decided a cycle earlier in S_WR_CMD.
+    // Registering the data path *again* on top of that added a second,
+    // uncancelled cycle of latency versus the command, so D0 landed on
+    // the bus one cycle after the SDRAM already latched the WRITE command
+    // (which expects D0 on the very same cycle -- SDR SDRAM write data has
+    // zero latency). Worse, wrf_rd_en being registered added a second lag
+    // between "pop requested" and wrf_out actually advancing, so the FIFO
+    // read pointer fell a full cycle further behind the burst's word
+    // index every cycle: words were driven twice each and the last word
+    // of every burst was dropped when dq_oe deasserted before it ever
+    // appeared. Net effect: every single write burst landed in SDRAM
+    // shifted, duplicated and truncated -- this, not RD_TAP, is why reads
+    // came back all-zero regardless of read-capture tap (confirmed: the
+    // full RD_TAP sweep found nothing, because the data being read back
+    // was never written correctly in the first place). Driving these
+    // combinationally from `state`/`wbit` (already-registered) and
+    // `wrf_out` (already combinational off the FIFO's registered pointer)
+    // puts them on the bus the exact same cycle as the command, with no
+    // extra register stage to introduce skew. Verified in sim: command and
+    // D0 now coincide, words 0-7 each appear exactly once with no
+    // duplicates or drops (full 8-word-aligned bursts and unaligned/
+    // DQM-masked partial bursts both checked).
+    wire        wr_data_active = (state == S_WR_DATA);
+    wire        wr_slot_masked = b_mask[wbit];
+    wire        dq_oe;
+    wire [15:0] dq_out;
+    wire [1:0]  dqm_q;
+    assign dq_oe    = wr_data_active;
+    assign dq_out    = wr_slot_masked ? 16'd0 : wrf_out;
+    assign dqm_q     = wr_data_active ? (wr_slot_masked ? 2'b11 : 2'b00) : 2'b00;
+    assign wrf_rd_en = wr_data_active && !wr_slot_masked;
+
     assign dram_dq  = dq_oe ? dq_out : 16'hzzzz;
     assign dram_dqm = dqm_q;
     assign dram_cke = 1'b1;  // CKE tied high (matches agg23's proven SNES controller).
 
-    reg [2:0] wbit;                    // position inside the write burst
     reg [3:0] rd_gap;                  // spacing between READ commands
 
     // ------------------------------------------------------- main FSM
@@ -270,15 +303,11 @@ module sdram_ctrl (
             ref_pending  <= 1'b0;
             cap_dly      <= {(CAP_W){1'b0}};
             rdf_inflight <= 4'd0;
-            dq_oe        <= 1'b0;
-            dq_out       <= 16'd0;
-            dqm_q        <= 2'b00;
             dram_ras_n   <= 1'b1;
             dram_cas_n   <= 1'b1;
             dram_we_n    <= 1'b1;
             dram_a       <= 13'd0;
             dram_ba      <= 2'd0;
-            wrf_rd_en    <= 1'b0;
             rdf_wr_en    <= 1'b0;
             wbit         <= 3'd0;
             rd_gap       <= 4'd0;
@@ -291,7 +320,6 @@ module sdram_ctrl (
             dram_ras_n <= 1'b1;
             dram_cas_n <= 1'b1;
             dram_we_n  <= 1'b1;
-            wrf_rd_en  <= 1'b0;
             rdf_wr_en  <= 1'b0;
 
             // refresh timer (runs once init is done)
@@ -432,19 +460,16 @@ module sdram_ctrl (
                 // else: wait for the writer to stream more words
             end
             S_WR_DATA: begin
-                // One word per clock; masked slots drive DQM (don't-care data).
-                dq_oe <= 1'b1;
-                dqm_q  <= b_mask[wbit] ? 2'b11 : 2'b00;
+                // One word per clock; masked slots drive DQM (don't-care
+                // data). The actual bus drive (dq_oe/dq_out/dqm_q) and the
+                // FIFO pop (wrf_rd_en) are combinational now -- see the
+                // "DQ / DQM" section above -- so this state only needs to
+                // track the diagnostic word count and advance wbit/finish
+                // the burst.
                 if (!b_mask[wbit]) begin
-                    dq_out    <= wrf_out;
-                    wrf_rd_en <= 1'b1;
                     diag_wr_word <= diag_wr_word + 1'b1;
-                end else begin
-                    dq_out <= 16'd0;
                 end
                 if (wbit == 3'd7) begin
-                    dq_oe    <= 1'b0;
-                    dqm_q    <= 2'b00;
                     wr_dirty <= 1'b1;
                     timer    <= T_WR;              // tWR before any PRECHARGE
                     req_addr <= req_addr + b_n;
