@@ -343,8 +343,9 @@ module video_scanout (
                     rgb_q <= 24'hFFFF00;  // yellow: parser in HDR (reading header)
                 else if (pstate_vid >= 5'd5 && pstate_vid <= 5'd7)
                     rgb_q <= 24'hFF00FF;  // magenta: parser in DIV (divider wait)
-                else if ((pstate_vid >= 5'd8 && pstate_vid <= 5'd23) || pstate_vid == 5'd25)
-                    rgb_q <= 24'h00FF00;  // green: parser in GEOM/pixel/SDRAM write
+                else if ((pstate_vid >= 5'd8 && pstate_vid <= 5'd23) || pstate_vid == 5'd25 ||
+                         pstate_vid == 5'd26 || pstate_vid == 5'd27)
+                    rgb_q <= 24'h00FF00;  // green: parser in GEOM/pixel/SDRAM write (GEOM now spans states 8,26,27)
                 else if (slot_invalid_vid)
                     rgb_q <= 24'hFF0000;  // red: parser failed
                 else if (!rd_burst_vid)

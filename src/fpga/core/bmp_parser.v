@@ -77,6 +77,8 @@ module bmp_parser (
                S_DIV0W       = 5'd6,
                S_DIV1W       = 5'd7,
                S_GEOM        = 5'd8,
+               S_GEOM1       = 5'd26,
+               S_GEOM2       = 5'd27,
                S_SKIP        = 5'd9,
                S_ROWINIT     = 5'd10,
                S_ROWINIT2    = 5'd25,
@@ -188,8 +190,7 @@ module bmp_parser (
         .done(div_done), .q(div_q)
     );
 
-    // temporaries for S_GEOM (blocking)
-    reg [25:0] t_scale;
+    // pipeline registers between S_GEOM1 -> S_GEOM2 (see comment at S_GEOM)
     reg [9:0]  t_dstw, t_dsth;
 
     // ------------------------------------------------------- main FSM
@@ -362,15 +363,33 @@ module bmp_parser (
                     state <= S_GEOM;
                 end
             end
+            // S_GEOM runs exactly once per image load (not per pixel), so
+            // it's split across three cycles instead of chaining a
+            // compare+mux, a 13x26 multiply, and a subtract+shift
+            // combinationally in one state. The original single-state
+            // version measured a -5.506ns / 8-logic-level setup violation
+            // in TimeQuest (Quartus's retiming fused it end-to-end with a
+            // downstream per-pixel multiplier's DSP enable register,
+            // Mult0~8|ENA_DFF1) -- Fmax on clk_mem was 64MHz against the
+            // 99MHz requirement. Splitting costs two extra clock cycles
+            // total across the whole image decode, which is free.
             S_GEOM: begin
-                t_scale = (q0 <= q1) ? q0 : q1;
-                t_dstw  = (img_w * t_scale) >> 16;
-                t_dsth  = (img_h * t_scale) >> 16;
+                // stage 0: scale = min(800/W, 720/H)  (compare + mux)
+                scale <= (q0 <= q1) ? q0 : q1;
+                state <= S_GEOM1;
+            end
+            S_GEOM1: begin
+                // stage 1: dst_w/dst_h = floor(img_w/img_h * scale)  (multiply)
+                t_dstw <= (img_w * scale) >> 16;
+                t_dsth <= (img_h * scale) >> 16;
+                state  <= S_GEOM2;
+            end
+            S_GEOM2: begin
+                // stage 2: degenerate check + letterbox offsets (subtract + shift)
                 if (t_dstw == 10'd0 || t_dsth == 10'd0) begin
                     header_ok <= 1'b0;             // degenerate
                     state     <= S_DRAIN;
                 end else begin
-                    scale <= t_scale;
                     dst_w <= t_dstw;
                     dst_h <= t_dsth;
                     x0    <= (10'd800 - t_dstw) >> 1;
