@@ -24,18 +24,35 @@
 // are pipelined (one every 8 clocks); a delay line generates the capture
 // enables so back-to-back bursts produce a contiguous data stream.
 //
-// Read capture timing (see pll_imageviewer.v): dram_clk lags the controller
-// clock by ~9.6ns (340 deg). The SDRAM samples the READ ~9.6ns after issue
-// and launches the first data word 3 dram_clk cycles later, so it is valid
-// at the FPGA ~41-52ns after issue. The controller samples it 5 clocks
-// (50.5ns) after issuing the READ.
-//   RD_TAP = 4: capture enable for an issued READ is high during controller
-//   cycles [issue+5, issue+12].
-// NOTE: the phase/latency numbers are hand-derived, not measured on hardware.
+// Read capture timing (see pll_imageviewer.v): originally derived assuming
+// dram_clk lagged the controller clock by ~9.6ns (340 deg, from the old
+// second-PLL-tap dram_clk generation), giving RD_TAP=4 (capture enable high
+// during controller cycles [issue+5, issue+12]). dram_clk is now generated
+// by an ALTDDIO_OUT off this same clock (see core_top.v/pin_ddio_clk.v),
+// which produces a cleaner ~180 deg (~5.05ns) lag instead -- a materially
+// different number that RD_TAP was never re-derived against, and this is
+// a physical pin-to-pin phase relationship STA can't check (it's not an
+// internal register-to-register path). Re-deriving by hand from the new
+// phase and CL=3 suggests the right value is now close to 3, but board
+// trace delay and exact SDRAM tAC aren't known precisely enough to be
+// confident, so RD_TAP is a runtime input (rd_tap_cfg, live-adjustable via
+// the D-pad in core_top.v) instead of a fixed constant, so it can be swept
+// on real hardware without a rebuild. NOTE: all these numbers are
+// hand-derived, not measured on hardware.
 
 module sdram_ctrl (
     input  wire        clk,            // 99 MHz controller clock
     input  wire        rst_n,          // synchronous reset, active low
+
+    // DEBUG: runtime override for RD_TAP (read-capture delay, in controller
+    // clocks after a READ is issued -- see the "Read capture timing" note
+    // below). Already synchronized to `clk` by the caller. Defaults to 4
+    // (the prior hand-derived value) via core_top's reset value; live-
+    // adjustable via the D-pad so it can be re-tuned on real hardware
+    // without a rebuild, since it depends on dram_clk's physical phase
+    // relative to clk, which changed when dram_clk's generation changed
+    // from a phase-shifted PLL tap to an ALTDDIO_OUT off clk itself.
+    input  wire [3:0]  rd_tap_cfg,
 
     output reg         init_done,
 
@@ -82,7 +99,8 @@ module sdram_ctrl (
     localparam T_WR       = 3;         // last write data -> PRECHARGE
     localparam T_MRD      = 2;         // MODE REGISTER SET -> next command
     localparam T_RTP      = 2;         // last read data -> PRECHARGE
-    localparam RD_TAP     = 4;         // capture cycles [issue+5, issue+12]
+    // RD_TAP is now the runtime rd_tap_cfg input (see port declaration and
+    // the read-capture-timing note above) instead of a fixed constant.
     localparam T_REFI     = 780;       // 7.8 us refresh interval
     localparam INIT_WAIT  = 20000;     // 200 us power-up wait
 
@@ -197,16 +215,20 @@ module sdram_ctrl (
 
     // ------------------------------------------------------- read capture
     // Delay line: each issued READ shifts a 1 in at bit 0. Bits
-    // [RD_TAP+7:RD_TAP] ORed together are the capture enable (high during
-    // cycles [issue+5, issue+12]); bit [RD_TAP+8] marks the burst finished.
-    // Because READs are spaced >= 8 cycles apart, back-to-back bursts give
-    // a contiguous capture stream.
-    localparam CAP_W = RD_TAP + 9;     // bits 0 .. RD_TAP+8
+    // [rd_tap_cfg+7:rd_tap_cfg] ORed together are the capture enable; bit
+    // [rd_tap_cfg+8] marks the burst finished. A burst finishes at least 9
+    // cycles after its issue (rd_tap_cfg=0 is the minimum), and READs are
+    // spaced exactly 8 cycles apart, so issue_now and fin_pulse never
+    // coincide for any rd_tap_cfg value in range. CAP_W is sized for the
+    // worst case of the 4-bit rd_tap_cfg (max 15) since it's now a runtime
+    // value instead of a compile-time constant.
+    localparam CAP_W = 4'hF + 9;       // bits 0 .. 15+8 (worst case)
     reg [CAP_W-1:0] cap_dly;
     wire issue_now = (state == S_RD_CMD) && (timer == 16'd0) && (rd_gap == 4'd0)
                      && rdf_room && (rdf_inflight < 4'd4);
-    wire cap_en    = |cap_dly[RD_TAP+7:RD_TAP];
-    wire fin_pulse = cap_dly[RD_TAP+8];
+    wire cap_en    = |cap_dly[rd_tap_cfg +: 8];
+    wire [4:0] fin_bit = {1'b0, rd_tap_cfg} + 5'd8;
+    wire fin_pulse = cap_dly[fin_bit];
     reg [3:0] rdf_inflight;            // READs issued, capture not finished
 
     // Space accounting: never issue a READ unless the FIFO can absorb it

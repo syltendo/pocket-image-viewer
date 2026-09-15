@@ -582,6 +582,40 @@ end
 ////////////////////////////////////////////////////////////////////////////////////////
 
 //
+// DEBUG: D-pad up/down live-adjusts the SDRAM read-capture tap (RD_TAP,
+// see sdram_ctrl.v) without needing a rebuild. Starts at 4 (the prior
+// hand-derived default); up increases, down decreases, wraps 0..15.
+// Temporary aid for re-tuning read-capture timing now that dram_clk's
+// generation (ALTDDIO_OUT off clk_mem, see below) gives it a different
+// physical phase relationship to clk_mem than the old design this was
+// originally tuned against. Remove once a working value is confirmed and
+// hardcoded back as a constant.
+//
+
+    reg [3:0] rd_tap_dbg;
+    reg       nav_up_p, nav_down_p;
+always @(posedge clk_74a or negedge reset_n) begin
+    if (!reset_n) begin
+        rd_tap_dbg <= 4'd4;
+        nav_up_p   <= 1'b0;
+        nav_down_p <= 1'b0;
+    end else begin
+        nav_up_p   <= cont1_key[0];
+        nav_down_p <= cont1_key[1];
+        if (cont1_key[0] && !nav_up_p)
+            rd_tap_dbg <= rd_tap_dbg + 4'd1;
+        else if (cont1_key[1] && !nav_down_p)
+            rd_tap_dbg <= rd_tap_dbg - 4'd1;
+    end
+end
+
+    wire [3:0] rd_tap_mem;
+synch_3 #(.WIDTH(4)) s_rd_tap (rd_tap_dbg, rd_tap_mem, clk_mem);
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+//
 // slot manager: data slots -> parser input FIFO
 //
 
@@ -830,6 +864,8 @@ async_fifo #(
 sdram_ctrl mem_ctrl_inst (
     .clk       ( clk_mem ),
     .rst_n     ( sys_rst_n_mem ),
+
+    .rd_tap_cfg ( rd_tap_mem ),
 
     .init_done ( sdram_init_done ),
 
