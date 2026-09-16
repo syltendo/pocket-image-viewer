@@ -52,7 +52,13 @@ module sdram_ctrl (
     // without a rebuild, since it depends on dram_clk's physical phase
     // relative to clk, which changed when dram_clk's generation changed
     // from a phase-shifted PLL tap to an ALTDDIO_OUT off clk itself.
-    input  wire [3:0]  rd_tap_cfg,
+    // Widened from 4 to 6 bits (0-63, was 0-15) after a full 0-15 sweep on
+    // real hardware came back black at every value, post write-burst-fix.
+    // A hand-derived board delay should easily fit inside 0-15 cycles, so
+    // this is a low-probability hedge (the wider range costs nothing) more
+    // than an expected fix -- if 16-63 also comes back all black, that's
+    // strong evidence the problem isn't read-capture timing at all.
+    input  wire [5:0]  rd_tap_cfg,
 
     output reg         init_done,
 
@@ -216,18 +222,26 @@ module sdram_ctrl (
     // ------------------------------------------------------- read capture
     // Delay line: each issued READ shifts a 1 in at bit 0. Bits
     // [rd_tap_cfg+7:rd_tap_cfg] ORed together are the capture enable; bit
-    // [rd_tap_cfg+8] marks the burst finished. A burst finishes at least 9
-    // cycles after its issue (rd_tap_cfg=0 is the minimum), and READs are
-    // spaced exactly 8 cycles apart, so issue_now and fin_pulse never
-    // coincide for any rd_tap_cfg value in range. CAP_W is sized for the
-    // worst case of the 4-bit rd_tap_cfg (max 15) since it's now a runtime
+    // [rd_tap_cfg+8] marks the burst finished. CAP_W is sized for the
+    // worst case of the 6-bit rd_tap_cfg (max 63) since it's a runtime
     // value instead of a compile-time constant.
-    localparam CAP_W = 4'hF + 9;       // bits 0 .. 15+8 (worst case)
+    //
+    // NOTE on issue/finish coincidence: with the original 4-bit range
+    // (0-15), a finishing burst and a newly-issued one never landed on the
+    // same cycle (READs are spaced exactly 8 cycles apart, and every tap
+    // in 0-15 finishes on an offset that avoids the coincidence). Widened
+    // to 6 bits (0-63) so a much larger physical read-capture delay can be
+    // swept on hardware, but at some tap values in the new, wider range
+    // finish and issue CAN land on the same cycle. rdf_inflight below is
+    // written as two independent updates (rather than the original
+    // if/else-if) so that case nets to zero correctly instead of silently
+    // dropping one side of the count.
+    localparam CAP_W = 6'h3F + 9;      // bits 0 .. 63+8 (worst case)
     reg [CAP_W-1:0] cap_dly;
     wire issue_now = (state == S_RD_CMD) && (timer == 16'd0) && (rd_gap == 4'd0)
                      && rdf_room && (rdf_inflight < 4'd4);
     wire cap_en    = |cap_dly[rd_tap_cfg +: 8];
-    wire [4:0] fin_bit = {1'b0, rd_tap_cfg} + 5'd8;
+    wire [6:0] fin_bit = {1'b0, rd_tap_cfg} + 7'd8;
     wire fin_pulse = cap_dly[fin_bit];
     reg [3:0] rdf_inflight;            // READs issued, capture not finished
 
@@ -340,12 +354,17 @@ module sdram_ctrl (
             if (issue_now) begin
                 diag_rd_burst <= diag_rd_burst + 1'b1;
             end
-            // (issue_now and fin_pulse can never coincide: READs are >= 8
-            // clocks apart and a burst finishes 13 clocks after its issue)
-            if (issue_now && !fin_pulse)
-                rdf_inflight <= rdf_inflight + 1'b1;
-            else if (fin_pulse && !issue_now)
-                rdf_inflight <= rdf_inflight - 1'b1;
+            // issue_now and fin_pulse are handled as independent +1/-1
+            // updates (not if/else-if) so that a tap value where they land
+            // on the same cycle nets to zero correctly instead of one side
+            // of the count silently getting dropped -- see the CAP_W
+            // comment above on why that case is now reachable with the
+            // widened 6-bit rd_tap_cfg range.
+            case ({issue_now, fin_pulse})
+                2'b10:   rdf_inflight <= rdf_inflight + 1'b1;
+                2'b01:   rdf_inflight <= rdf_inflight - 1'b1;
+                default: ; // 2'b00: no change. 2'b11: one in, one out, net zero.
+            endcase
 
             case (state)
 
