@@ -509,7 +509,8 @@ core_bridge_cmd icb (
 
     wire    clk_vid;            // 39.6 MHz video
     wire    clk_vid_90;
-    wire    clk_mem;            // 99 MHz SDRAM controller
+    wire    clk_mem;            // 100 MHz SDRAM controller
+    wire    clk_mem_shifted;    // 99 MHz SDRAM chip clock, 180 deg
 
     wire    pll_core_locked;
     wire    pll_core_locked_s;
@@ -522,6 +523,7 @@ pll_imageviewer mp1 (
     .outclk_0       ( clk_vid ),
     .outclk_1       ( clk_vid_90 ),
     .outclk_2       ( clk_mem ),
+    .outclk_3       ( clk_mem_shifted ),
 
     .locked         ( pll_core_locked )
 );
@@ -541,18 +543,7 @@ synch_3 s_vid_rst(reset_ok_74a, vid_rst_n, clk_vid);
 wire sys_rst_n_mem;
 synch_3 s_sys_rst_mem(pll_core_locked_s, sys_rst_n_mem, clk_mem);
 
-// dram_clk: generated via ALTDDIO_OUT off clk_mem (same clock that drives
-// dram_a/dram_dq/dram_dqm/commands in sdram_ctrl.v), matching agg23's proven
-// SDRAM controllers. datain_h=0, datain_l=1 gives a clean 180-degree shift
-// relative to clk_mem with a Quartus-characterized, same-clock-domain Tco
-// instead of the skew between two independent, STA-unrelated PLL taps.
-// See pll_imageviewer.v for why the previous outclk_3 approach was unsound.
-pin_ddio_clk dram_clk_ddio (
-    .datain_h ( 1'b0 ),
-    .datain_l ( 1'b1 ),
-    .outclock ( clk_mem ),
-    .dataout  ( dram_clk )
-);
+assign dram_clk = clk_mem_shifted;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -577,45 +568,6 @@ always @(posedge clk_74a or negedge reset_n) begin
             display_slot <= (display_slot == 3'd7) ? 3'd0 : display_slot + 3'd1;
     end
 end
-
-
-////////////////////////////////////////////////////////////////////////////////////////
-
-//
-// DEBUG: D-pad up/down live-adjusts the SDRAM read-capture tap (RD_TAP,
-// see sdram_ctrl.v) without needing a rebuild. Starts at 4 (the prior
-// hand-derived default); up increases, down decreases, wraps 0..63.
-// Temporary aid for re-tuning read-capture timing now that dram_clk's
-// generation (ALTDDIO_OUT off clk_mem, see below) gives it a different
-// physical phase relationship to clk_mem than the old design this was
-// originally tuned against. Remove once a working value is confirmed and
-// hardcoded back as a constant.
-//
-// Widened from 4 to 6 bits (0-63, was 0-15) after a full 0-15 sweep on
-// real hardware, on a build with the write-burst fix in place, still came
-// back black at every value -- widening the search range in case the
-// real board's delay falls outside the original window. See sdram_ctrl.v.
-//
-
-    reg [5:0] rd_tap_dbg;
-    reg       nav_up_p, nav_down_p;
-always @(posedge clk_74a or negedge reset_n) begin
-    if (!reset_n) begin
-        rd_tap_dbg <= 6'd4;
-        nav_up_p   <= 1'b0;
-        nav_down_p <= 1'b0;
-    end else begin
-        nav_up_p   <= cont1_key[0];
-        nav_down_p <= cont1_key[1];
-        if (cont1_key[0] && !nav_up_p)
-            rd_tap_dbg <= rd_tap_dbg + 6'd1;
-        else if (cont1_key[1] && !nav_down_p)
-            rd_tap_dbg <= rd_tap_dbg - 6'd1;
-    end
-end
-
-    wire [5:0] rd_tap_mem;
-synch_3 #(.WIDTH(6)) s_rd_tap (rd_tap_dbg, rd_tap_mem, clk_mem);
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -722,16 +674,9 @@ bmp_parser parser_inst (
     .wr_ready          ( p_wr_ready )
 );
 
-// DIAGNOSTIC: Test pattern generator - writes to SDRAM on boot, bypassing
-// the parser. Originally wrote solid white (0xFFFF) everywhere: if video
-// showed white, SDRAM writes/reads worked; if black, something was broken.
-// That worked as a binary signal, but gave no information about *how*
-// broken things were, since a shifted/misaligned/partial read of a
-// constant pattern still often looks either solid-right or solid-black.
-// Switched to a per-word, position-dependent value (a horizontal gradient
-// that repeats every row) so a partially-working read path shows up as
-// visible banding/structure instead of collapsing to another ambiguous
-// solid color -- much more diagnostic on real hardware.
+// DIAGNOSTIC: Test pattern generator - writes solid white (0xFFFF) to
+// SDRAM on boot, bypassing the parser. If video shows white, SDRAM
+// writes work. If black, SDRAM write path is broken.
 reg        t_wr_req;
 reg [24:0] t_wr_addr;
 reg [20:0] t_wr_len;
@@ -754,7 +699,7 @@ always @(posedge clk_mem or negedge sys_rst_n_mem) begin
         t_wr_req  <= 1'b0;
         t_wr_addr <= 25'd0;
         t_wr_len  <= 21'd0;
-        t_wr_data <= 16'h0000;
+        t_wr_data <= 16'hFFFF;
         t_wr_valid <= 1'b0;
         t_addr    <= 25'd0;
         t_count   <= 21'd0;
@@ -775,16 +720,10 @@ always @(posedge clk_mem or negedge sys_rst_n_mem) begin
                 t_state   <= T_DATA;
             end
             T_DATA: begin
-                // Stream a position-dependent word per slot instead of a
-                // constant, so a correct (or partially-correct) read shows
-                // a repeating horizontal gradient instead of a flat color.
+                // Stream 0xFFFF data words
                 if (t_wr_ready) begin
                     t_wr_valid <= 1'b1;
-                    // +16'h0101 keeps every word non-zero (0x101..0x200),
-                    // so video_scanout's "all-zero = broken" black/dark-red
-                    // diagnostic coloring still means what it says instead
-                    // of also triggering on legitimate low-gradient values.
-                    t_wr_data  <= {8'h00, t_count[8:1]} + 16'h0101;
+                    t_wr_data  <= 16'hFFFF;
                     t_count    <= t_count + 1'b1;
                     if (t_count == T_CHUNK - 1) begin
                         t_state <= T_WAIT;
@@ -882,8 +821,6 @@ async_fifo #(
 sdram_ctrl mem_ctrl_inst (
     .clk       ( clk_mem ),
     .rst_n     ( sys_rst_n_mem ),
-
-    .rd_tap_cfg ( rd_tap_mem ),
 
     .init_done ( sdram_init_done ),
 

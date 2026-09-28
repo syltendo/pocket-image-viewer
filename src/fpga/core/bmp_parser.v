@@ -77,12 +77,9 @@ module bmp_parser (
                S_DIV0W       = 5'd6,
                S_DIV1W       = 5'd7,
                S_GEOM        = 5'd8,
-               S_GEOM1       = 5'd26,
-               S_GEOM2       = 5'd27,
                S_SKIP        = 5'd9,
                S_ROWINIT     = 5'd10,
                S_ROWINIT2    = 5'd25,
-               S_ROWINIT3    = 5'd28,
                S_PIXEL       = 5'd11,
                S_FILL        = 5'd12,
                S_PIXELNEXT   = 5'd13,
@@ -153,12 +150,6 @@ module bmp_parser (
     reg [31:0] pad_left;
     reg [23:0] px_w;                      // pixel being written (2 words)
 
-    // pipeline registers for the per-pixel c_dx0/c_dx1 mapping (used in
-    // S_PIXEL/S_FILL below) -- same fix shape as S_GEOM's pipeline, but
-    // per-pixel instead of per-image; see the comment at S_PIXEL.
-    reg [9:0]  mul_c0_hi_r, mul_c1_hi_r;  // registered col*scale / (col+1)*scale, bits [25:16]
-    reg [10:0] dx0_r, dx1_r;              // registered c_dx0/c_dx1
-
     // scale multiplies (13b x 26b). The results used are < 800 / < 720,
     // so bits [25:16] carry the value; the 11-bit sums cannot overflow
     // past 800/720 (see derivation in docs/architecture.md).
@@ -166,15 +157,10 @@ module bmp_parser (
     wire [38:0] mul_c1 = (col + 13'd1) * scale;
     wire [38:0] mul_r0 = src_row * scale;
     wire [38:0] mul_r1 = (src_row + 13'd1) * scale;
-    // c_dx0/c_dx1 (the col-side mapping) used to be continuous wires here;
-    // they're now pipelined into dx0_r/dx1_r (see S_PIXEL) since that
-    // combinational chain was clk_mem's worst timing violation. c_dy0/c_dy1
-    // (the once-per-row src_row-side mapping) had the same problem once the
-    // col-side chain was fixed -- it was the next worst violation -- so it's
-    // now pipelined the same way into dy0_p/dy1_p (see S_ROWINIT2/S_ROWINIT3).
-    reg  [9:0]  mul_r0_hi_r, mul_r1_hi_r; // registered src_row*scale / (src_row+1)*scale, bits [25:16]
-    wire [10:0] dy0_p = {1'b0, y0} + {1'b0, mul_r0_hi_r};
-    wire [10:0] dy1_p = {1'b0, y0} + {1'b0, mul_r1_hi_r};
+    wire [10:0] c_dx0 = {1'b0, x0} + mul_c0[25:16];
+    wire [10:0] c_dx1 = {1'b0, x0} + mul_c1[25:16];
+    wire [10:0] c_dy0 = {1'b0, y0} + mul_r0[25:16];
+    wire [10:0] c_dy1 = {1'b0, y0} + mul_r1[25:16];
 
     // ------------------------------------------------------- line buffer
     // 800 x 24 block RAM, true dual port (write: fill, read: row write).
@@ -202,7 +188,8 @@ module bmp_parser (
         .done(div_done), .q(div_q)
     );
 
-    // pipeline registers between S_GEOM1 -> S_GEOM2 (see comment at S_GEOM)
+    // temporaries for S_GEOM (blocking)
+    reg [25:0] t_scale;
     reg [9:0]  t_dstw, t_dsth;
 
     // ------------------------------------------------------- main FSM
@@ -375,33 +362,15 @@ module bmp_parser (
                     state <= S_GEOM;
                 end
             end
-            // S_GEOM runs exactly once per image load (not per pixel), so
-            // it's split across three cycles instead of chaining a
-            // compare+mux, a 13x26 multiply, and a subtract+shift
-            // combinationally in one state. The original single-state
-            // version measured a -5.506ns / 8-logic-level setup violation
-            // in TimeQuest (Quartus's retiming fused it end-to-end with a
-            // downstream per-pixel multiplier's DSP enable register,
-            // Mult0~8|ENA_DFF1) -- Fmax on clk_mem was 64MHz against the
-            // 99MHz requirement. Splitting costs two extra clock cycles
-            // total across the whole image decode, which is free.
             S_GEOM: begin
-                // stage 0: scale = min(800/W, 720/H)  (compare + mux)
-                scale <= (q0 <= q1) ? q0 : q1;
-                state <= S_GEOM1;
-            end
-            S_GEOM1: begin
-                // stage 1: dst_w/dst_h = floor(img_w/img_h * scale)  (multiply)
-                t_dstw <= (img_w * scale) >> 16;
-                t_dsth <= (img_h * scale) >> 16;
-                state  <= S_GEOM2;
-            end
-            S_GEOM2: begin
-                // stage 2: degenerate check + letterbox offsets (subtract + shift)
+                t_scale = (q0 <= q1) ? q0 : q1;
+                t_dstw  = (img_w * t_scale) >> 16;
+                t_dsth  = (img_h * t_scale) >> 16;
                 if (t_dstw == 10'd0 || t_dsth == 10'd0) begin
                     header_ok <= 1'b0;             // degenerate
                     state     <= S_DRAIN;
                 end else begin
+                    scale <= t_scale;
                     dst_w <= t_dstw;
                     dst_h <= t_dsth;
                     x0    <= (10'd800 - t_dstw) >> 1;
@@ -438,11 +407,8 @@ module bmp_parser (
                 if (row == img_h) begin
                     state <= S_DRAIN;
                 end else begin
-                    // NOTE: mul_r0/mul_r1 use src_row, which settles next
-                    // cycle; the row geometry is pipelined across
-                    // S_ROWINIT2/S_ROWINIT3 below (same fix shape as the
-                    // per-pixel S_PIXEL pipeline -- this was clk_mem's next
-                    // worst violation once the per-pixel one was fixed).
+                    // NOTE: c_dy0/c_dy1 use src_row, which settles next
+                    // cycle; the row geometry is latched in S_ROWINIT2.
                     src_row <= top_down ? row : (img_h - 13'd1 - row);
                     col     <= 13'd0;
                     px_byte <= 2'd0;
@@ -450,18 +416,9 @@ module bmp_parser (
                 end
             end
             S_ROWINIT2: begin
-                // stage 1: register the multiply only (src_row is already
-                // stable, set one cycle ago in S_ROWINIT).
-                mul_r0_hi_r <= mul_r0[25:16];
-                mul_r1_hi_r <= mul_r1[25:16];
-                state <= S_ROWINIT3;
-            end
-            S_ROWINIT3: begin
-                // stage 2: add + compare only, from the registered
-                // multiply -- cheap, fits comfortably in one cycle.
-                dy0 <= dy0_p[9:0];
-                dy1 <= dy1_p[9:0];
-                if (dy0_p == dy1_p) begin
+                dy0 <= c_dy0[9:0];
+                dy1 <= c_dy1[9:0];
+                if (c_dy0 == c_dy1) begin
                     // this source row maps to no dest rows: skip it
                     pad_left <= stride;
                     state    <= S_SKIPROW;
@@ -471,23 +428,7 @@ module bmp_parser (
             end
 
             // --------------------------------- pixel bytes (B,G,R)
-            // The col -> c_dx0/c_dx1 mapping (scale multiply + x0 add) is
-            // pipelined across the 3 existing byte-shift cycles of this
-            // state instead of computed combinationally in one cycle: the
-            // worst_setup_paths.rpt after the S_GEOM fix showed this exact
-            // chain (col(reg) -> multiply -> add -> compare -> state mux)
-            // was the new worst clk_mem violation (-1.12ns, all 40 worst
-            // paths) -- same shape as S_GEOM but per-pixel instead of
-            // per-image. col is stable for all 3 bytes of S_PIXEL, so
-            // registering the multiply on byte 0->1 and the add on byte
-            // 1->2 is free: dx0_r/dx1_r are valid well before they're read
-            // at byte 2 (or during S_FILL, which runs strictly after).
             S_PIXEL: begin
-                mul_c0_hi_r <= mul_c0[25:16];
-                mul_c1_hi_r <= mul_c1[25:16];
-                dx0_r <= {1'b0, x0} + {1'b0, mul_c0_hi_r};
-                dx1_r <= {1'b0, x0} + {1'b0, mul_c1_hi_r};
-
                 if (no_more_data) begin
                     state <= S_FINISH;
                 end else if (sh_avail != 3'd0) begin
@@ -499,13 +440,11 @@ module bmp_parser (
                     shifter  <= {shifter[23:0], 8'd0};
                     sh_avail <= sh_avail - 3'd1;
                     if (px_byte == 2'd2) begin
-                        // fill linebuf[dx0_r .. dx1_r) -- pipelined values;
-                        // correct since col hasn't moved since S_PIXEL was
-                        // entered (see comment above).
-                        if (dx0_r == dx1_r) begin
+                        // fill linebuf[c_dx0 .. c_dx1)
+                        if (c_dx0 == c_dx1) begin
                             state <= S_PIXELNEXT;  // downscaled away
                         end else begin
-                            k     <= dx0_r[9:0];
+                            k     <= c_dx0[9:0];
                             state <= S_FILL;
                         end
                         px_byte <= 2'd0;
@@ -524,9 +463,7 @@ module bmp_parser (
                 lb_we    <= 1'b1;
                 lb_waddr <= k;
                 lb_wdata <= px;
-                // dx1_r (pipelined in S_PIXEL, see above) instead of
-                // recomputing c_dx1 combinationally here too.
-                if (k + 10'd1 == dx1_r) begin
+                if (k + 10'd1 == c_dx1) begin
                     state <= S_PIXELNEXT;
                 end else begin
                     k <= k + 10'd1;

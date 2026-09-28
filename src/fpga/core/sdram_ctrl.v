@@ -24,41 +24,18 @@
 // are pipelined (one every 8 clocks); a delay line generates the capture
 // enables so back-to-back bursts produce a contiguous data stream.
 //
-// Read capture timing (see pll_imageviewer.v): originally derived assuming
-// dram_clk lagged the controller clock by ~9.6ns (340 deg, from the old
-// second-PLL-tap dram_clk generation), giving RD_TAP=4 (capture enable high
-// during controller cycles [issue+5, issue+12]). dram_clk is now generated
-// by an ALTDDIO_OUT off this same clock (see core_top.v/pin_ddio_clk.v),
-// which produces a cleaner ~180 deg (~5.05ns) lag instead -- a materially
-// different number that RD_TAP was never re-derived against, and this is
-// a physical pin-to-pin phase relationship STA can't check (it's not an
-// internal register-to-register path). Re-deriving by hand from the new
-// phase and CL=3 suggests the right value is now close to 3, but board
-// trace delay and exact SDRAM tAC aren't known precisely enough to be
-// confident, so RD_TAP is a runtime input (rd_tap_cfg, live-adjustable via
-// the D-pad in core_top.v) instead of a fixed constant, so it can be swept
-// on real hardware without a rebuild. NOTE: all these numbers are
-// hand-derived, not measured on hardware.
+// Read capture timing (see pll_imageviewer.v): dram_clk lags the controller
+// clock by ~9.6ns (340 deg). The SDRAM samples the READ ~9.6ns after issue
+// and launches the first data word 3 dram_clk cycles later, so it is valid
+// at the FPGA ~41-52ns after issue. The controller samples it 5 clocks
+// (50.5ns) after issuing the READ.
+//   RD_TAP = 4: capture enable for an issued READ is high during controller
+//   cycles [issue+5, issue+12].
+// NOTE: the phase/latency numbers are hand-derived, not measured on hardware.
 
 module sdram_ctrl (
     input  wire        clk,            // 99 MHz controller clock
     input  wire        rst_n,          // synchronous reset, active low
-
-    // DEBUG: runtime override for RD_TAP (read-capture delay, in controller
-    // clocks after a READ is issued -- see the "Read capture timing" note
-    // below). Already synchronized to `clk` by the caller. Defaults to 4
-    // (the prior hand-derived value) via core_top's reset value; live-
-    // adjustable via the D-pad so it can be re-tuned on real hardware
-    // without a rebuild, since it depends on dram_clk's physical phase
-    // relative to clk, which changed when dram_clk's generation changed
-    // from a phase-shifted PLL tap to an ALTDDIO_OUT off clk itself.
-    // Widened from 4 to 6 bits (0-63, was 0-15) after a full 0-15 sweep on
-    // real hardware came back black at every value, post write-burst-fix.
-    // A hand-derived board delay should easily fit inside 0-15 cycles, so
-    // this is a low-probability hedge (the wider range costs nothing) more
-    // than an expected fix -- if 16-63 also comes back all black, that's
-    // strong evidence the problem isn't read-capture timing at all.
-    input  wire [5:0]  rd_tap_cfg,
 
     output reg         init_done,
 
@@ -105,8 +82,7 @@ module sdram_ctrl (
     localparam T_WR       = 3;         // last write data -> PRECHARGE
     localparam T_MRD      = 2;         // MODE REGISTER SET -> next command
     localparam T_RTP      = 2;         // last read data -> PRECHARGE
-    // RD_TAP is now the runtime rd_tap_cfg input (see port declaration and
-    // the read-capture-timing note above) instead of a fixed constant.
+    localparam RD_TAP     = 4;         // capture cycles [issue+5, issue+12]
     localparam T_REFI     = 780;       // 7.8 us refresh interval
     localparam INIT_WAIT  = 20000;     // 200 us power-up wait
 
@@ -177,7 +153,7 @@ module sdram_ctrl (
     wire [6:0] wrf_level = wrf_wr - wrf_rd;
     wire       wrf_full  = (wrf_level == 7'd64);
     wire       wrf_empty = (wrf_level == 7'd0);
-    wire       wrf_rd_en;
+    reg        wrf_rd_en;
     wire [15:0] wrf_out = wrf_mem[wrf_rd[5:0]];
     assign wr_ready = !wrf_full;
 
@@ -221,28 +197,16 @@ module sdram_ctrl (
 
     // ------------------------------------------------------- read capture
     // Delay line: each issued READ shifts a 1 in at bit 0. Bits
-    // [rd_tap_cfg+7:rd_tap_cfg] ORed together are the capture enable; bit
-    // [rd_tap_cfg+8] marks the burst finished. CAP_W is sized for the
-    // worst case of the 6-bit rd_tap_cfg (max 63) since it's a runtime
-    // value instead of a compile-time constant.
-    //
-    // NOTE on issue/finish coincidence: with the original 4-bit range
-    // (0-15), a finishing burst and a newly-issued one never landed on the
-    // same cycle (READs are spaced exactly 8 cycles apart, and every tap
-    // in 0-15 finishes on an offset that avoids the coincidence). Widened
-    // to 6 bits (0-63) so a much larger physical read-capture delay can be
-    // swept on hardware, but at some tap values in the new, wider range
-    // finish and issue CAN land on the same cycle. rdf_inflight below is
-    // written as two independent updates (rather than the original
-    // if/else-if) so that case nets to zero correctly instead of silently
-    // dropping one side of the count.
-    localparam CAP_W = 6'h3F + 9;      // bits 0 .. 63+8 (worst case)
+    // [RD_TAP+7:RD_TAP] ORed together are the capture enable (high during
+    // cycles [issue+5, issue+12]); bit [RD_TAP+8] marks the burst finished.
+    // Because READs are spaced >= 8 cycles apart, back-to-back bursts give
+    // a contiguous capture stream.
+    localparam CAP_W = RD_TAP + 9;     // bits 0 .. RD_TAP+8
     reg [CAP_W-1:0] cap_dly;
     wire issue_now = (state == S_RD_CMD) && (timer == 16'd0) && (rd_gap == 4'd0)
                      && rdf_room && (rdf_inflight < 4'd4);
-    wire cap_en    = |cap_dly[rd_tap_cfg +: 8];
-    wire [6:0] fin_bit = {1'b0, rd_tap_cfg} + 7'd8;
-    wire fin_pulse = cap_dly[fin_bit];
+    wire cap_en    = |cap_dly[RD_TAP+7:RD_TAP];
+    wire fin_pulse = cap_dly[RD_TAP+8];
     reg [3:0] rdf_inflight;            // READs issued, capture not finished
 
     // Space accounting: never issue a READ unless the FIFO can absorb it
@@ -260,47 +224,14 @@ module sdram_ctrl (
     assign rd_busy = rd_busy_q;
 
     // ------------------------------------------------------- DQ / DQM
-    reg [2:0] wbit;                    // position inside the write burst
-
-    // dq_oe/dq_out/dqm_q/wrf_rd_en are combinational, not registered. They
-    // were originally `<= ` (registered) here, one cycle behind `state`
-    // and `wbit` -- but the WRITE command (dram_ras_n/cas_n/we_n/dram_a)
-    // is ALSO a registered output, decided a cycle earlier in S_WR_CMD.
-    // Registering the data path *again* on top of that added a second,
-    // uncancelled cycle of latency versus the command, so D0 landed on
-    // the bus one cycle after the SDRAM already latched the WRITE command
-    // (which expects D0 on the very same cycle -- SDR SDRAM write data has
-    // zero latency). Worse, wrf_rd_en being registered added a second lag
-    // between "pop requested" and wrf_out actually advancing, so the FIFO
-    // read pointer fell a full cycle further behind the burst's word
-    // index every cycle: words were driven twice each and the last word
-    // of every burst was dropped when dq_oe deasserted before it ever
-    // appeared. Net effect: every single write burst landed in SDRAM
-    // shifted, duplicated and truncated -- this, not RD_TAP, is why reads
-    // came back all-zero regardless of read-capture tap (confirmed: the
-    // full RD_TAP sweep found nothing, because the data being read back
-    // was never written correctly in the first place). Driving these
-    // combinationally from `state`/`wbit` (already-registered) and
-    // `wrf_out` (already combinational off the FIFO's registered pointer)
-    // puts them on the bus the exact same cycle as the command, with no
-    // extra register stage to introduce skew. Verified in sim: command and
-    // D0 now coincide, words 0-7 each appear exactly once with no
-    // duplicates or drops (full 8-word-aligned bursts and unaligned/
-    // DQM-masked partial bursts both checked).
-    wire        wr_data_active = (state == S_WR_DATA);
-    wire        wr_slot_masked = b_mask[wbit];
-    wire        dq_oe;
-    wire [15:0] dq_out;
-    wire [1:0]  dqm_q;
-    assign dq_oe    = wr_data_active;
-    assign dq_out    = wr_slot_masked ? 16'd0 : wrf_out;
-    assign dqm_q     = wr_data_active ? (wr_slot_masked ? 2'b11 : 2'b00) : 2'b00;
-    assign wrf_rd_en = wr_data_active && !wr_slot_masked;
-
+    reg        dq_oe;
+    reg [15:0] dq_out;
+    reg [1:0]  dqm_q;
     assign dram_dq  = dq_oe ? dq_out : 16'hzzzz;
     assign dram_dqm = dqm_q;
     assign dram_cke = 1'b1;  // CKE tied high (matches agg23's proven SNES controller).
 
+    reg [2:0] wbit;                    // position inside the write burst
     reg [3:0] rd_gap;                  // spacing between READ commands
 
     // ------------------------------------------------------- main FSM
@@ -317,11 +248,15 @@ module sdram_ctrl (
             ref_pending  <= 1'b0;
             cap_dly      <= {(CAP_W){1'b0}};
             rdf_inflight <= 4'd0;
+            dq_oe        <= 1'b0;
+            dq_out       <= 16'd0;
+            dqm_q        <= 2'b00;
             dram_ras_n   <= 1'b1;
             dram_cas_n   <= 1'b1;
             dram_we_n    <= 1'b1;
             dram_a       <= 13'd0;
             dram_ba      <= 2'd0;
+            wrf_rd_en    <= 1'b0;
             rdf_wr_en    <= 1'b0;
             wbit         <= 3'd0;
             rd_gap       <= 4'd0;
@@ -334,6 +269,7 @@ module sdram_ctrl (
             dram_ras_n <= 1'b1;
             dram_cas_n <= 1'b1;
             dram_we_n  <= 1'b1;
+            wrf_rd_en  <= 1'b0;
             rdf_wr_en  <= 1'b0;
 
             // refresh timer (runs once init is done)
@@ -354,17 +290,12 @@ module sdram_ctrl (
             if (issue_now) begin
                 diag_rd_burst <= diag_rd_burst + 1'b1;
             end
-            // issue_now and fin_pulse are handled as independent +1/-1
-            // updates (not if/else-if) so that a tap value where they land
-            // on the same cycle nets to zero correctly instead of one side
-            // of the count silently getting dropped -- see the CAP_W
-            // comment above on why that case is now reachable with the
-            // widened 6-bit rd_tap_cfg range.
-            case ({issue_now, fin_pulse})
-                2'b10:   rdf_inflight <= rdf_inflight + 1'b1;
-                2'b01:   rdf_inflight <= rdf_inflight - 1'b1;
-                default: ; // 2'b00: no change. 2'b11: one in, one out, net zero.
-            endcase
+            // (issue_now and fin_pulse can never coincide: READs are >= 8
+            // clocks apart and a burst finishes 13 clocks after its issue)
+            if (issue_now && !fin_pulse)
+                rdf_inflight <= rdf_inflight + 1'b1;
+            else if (fin_pulse && !issue_now)
+                rdf_inflight <= rdf_inflight - 1'b1;
 
             case (state)
 
@@ -479,16 +410,19 @@ module sdram_ctrl (
                 // else: wait for the writer to stream more words
             end
             S_WR_DATA: begin
-                // One word per clock; masked slots drive DQM (don't-care
-                // data). The actual bus drive (dq_oe/dq_out/dqm_q) and the
-                // FIFO pop (wrf_rd_en) are combinational now -- see the
-                // "DQ / DQM" section above -- so this state only needs to
-                // track the diagnostic word count and advance wbit/finish
-                // the burst.
+                // One word per clock; masked slots drive DQM (don't-care data).
+                dq_oe <= 1'b1;
+                dqm_q  <= b_mask[wbit] ? 2'b11 : 2'b00;
                 if (!b_mask[wbit]) begin
+                    dq_out    <= wrf_out;
+                    wrf_rd_en <= 1'b1;
                     diag_wr_word <= diag_wr_word + 1'b1;
+                end else begin
+                    dq_out <= 16'd0;
                 end
                 if (wbit == 3'd7) begin
+                    dq_oe    <= 1'b0;
+                    dqm_q    <= 2'b00;
                     wr_dirty <= 1'b1;
                     timer    <= T_WR;              // tWR before any PRECHARGE
                     req_addr <= req_addr + b_n;
