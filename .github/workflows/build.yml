@@ -78,10 +78,48 @@ jobs:
           } > "$OUT" 2>&1 || true
           echo "wrote $OUT"
 
+      - name: Detailed SDRAM output path report
+        if: always()
+        run: |
+          cat > /tmp/detail.tcl <<'TCL'
+          project_open ap_core
+          create_timing_netlist
+          read_sdc src/fpga/core/core_constraints.sdc
+          update_timing_netlist
+          report_timing -to [get_ports dram_dq[*]] -to [get_ports dram_dqm[*]] \
+            -setup -npaths 3 -detail full_path -file /tmp/detail_rpt.txt
+          project_close
+          TCL
+          OUT="output-detail.txt"
+          {
+            echo "=== Detailed setup paths: registers -> dram_dq/dram_dqm ==="
+            echo ""
+            if [ -f src/fpga/output_files/ap_core.sta.rpt ]; then
+              cd src/fpga
+              quartus_sta -t /tmp/detail.tcl >/tmp/sta_log.txt 2>&1 || true
+              cd /build
+              cat /tmp/detail_rpt.txt 2>/dev/null || echo "detail report not produced"
+              echo ""
+              echo "--- sta log tail ---"
+              tail -20 /tmp/sta_log.txt 2>/dev/null
+            else
+              echo "NOTE: sta.rpt not found, skipping"
+            fi
+          } > "$OUT" 2>&1 || true
+          echo "wrote $OUT"
+
       - name: Upload timing summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: timing-summary
           path: timing-summary.txt
+          if-no-files-found: warn
+
+      - name: Upload output detail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-detail
+          path: output-detail.txt
           if-no-files-found: warn
