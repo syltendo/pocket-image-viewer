@@ -299,3 +299,22 @@ User supplied the full `ap_core.sta.rpt` from the measurement build (Quartus
 - Tco_clk not yet measured. If Tco_clk is 5-6ns, real slack may be positive.
 - This does NOT mean the design works — the controller logic (-5.2ns) is
   definitely broken and must be fixed first.
+
+---
+
+## 2026-09-29: Build #4 — multicycle still not applied, root cause refined
+
+### Build #3 result (timing-summary-4)
+- general[2]: -5.520ns (was -5.159ns) — WORSE. TNS -614ns (was -535ns).
+- The `get_registers {*|mem_ctrl_inst|*}` multicycle did NOT take effect.
+  Likely cause: hierarchy flattened in netlist, or pattern doesn't match.
+- Detail script failed (report_timing takes only one -to).
+
+### Refined diagnosis
+- general[2] (99MHz) drives SDRAM controller + BMP parser + video scanout
+  mem interface + FIFOs. The 112 failing endpoints may not all be in
+  mem_ctrl_inst.
+- Fix 2026-09-29: multicycle 2 applied to ALL intra-general[2] paths via
+  `-from [get_clocks ...] -to [get_clocks ...]` (setup 2, hold 1).
+  Safe: SDRAM protocol timing is in clock cycles, not ns.
+- Detail script fixed: `report_timing -to [get_ports dram_dq*]`.

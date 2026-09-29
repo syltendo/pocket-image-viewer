@@ -86,8 +86,9 @@ jobs:
           create_timing_netlist
           read_sdc core/core_constraints.sdc
           update_timing_netlist
-          report_timing -to [get_ports dram_dq*] \
-            -setup -npaths 2 -detail full_path -file detail_rpt.txt
+          for {set i 0} {$i < 16} {incr i} { report_timing -to [get_ports dram_dq[$i]] -setup -npaths 1 -detail full_path -file detail_rpt.txt -append }
+          for {set i 0} {$i < 2} {incr i} { report_timing -to [get_ports dram_dqm[$i]] -setup -npaths 1 -detail full_path -file detail_rpt.txt -append }
+          for {set i 0} {$i < 13} {incr i} { report_timing -to [get_ports dram_a[$i]] -setup -npaths 1 -detail full_path -file detail_rpt.txt -append }
           project_close
           TCL
           cp detail.tcl src/fpga/detail.tcl
