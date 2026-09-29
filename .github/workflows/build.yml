@@ -81,30 +81,28 @@ jobs:
       - name: Detailed SDRAM output path report
         if: always()
         run: |
-          cat > /tmp/detail.tcl <<'TCL'
+          cat > detail.tcl <<'TCL'
           project_open ap_core
           create_timing_netlist
-          read_sdc src/fpga/core/core_constraints.sdc
+          read_sdc core/core_constraints.sdc
           update_timing_netlist
           report_timing -to [get_ports dram_dq[*]] -to [get_ports dram_dqm[*]] \
-            -setup -npaths 3 -detail full_path -file /tmp/detail_rpt.txt
+            -setup -npaths 2 -detail full_path -file detail_rpt.txt
           project_close
           TCL
+          cp detail.tcl src/fpga/detail.tcl
+          docker run --rm \
+            -v "$PWD:/build" -w /build/src/fpga \
+            raetro/quartus:21.1.1 \
+            bash -c 'quartus_sta -t detail.tcl > sta_detail.log 2>&1 || true'
           OUT="output-detail.txt"
           {
             echo "=== Detailed setup paths: registers -> dram_dq/dram_dqm ==="
             echo ""
-            if [ -f src/fpga/output_files/ap_core.sta.rpt ]; then
-              cd src/fpga
-              quartus_sta -t /tmp/detail.tcl >/tmp/sta_log.txt 2>&1 || true
-              cd /build
-              cat /tmp/detail_rpt.txt 2>/dev/null || echo "detail report not produced"
-              echo ""
-              echo "--- sta log tail ---"
-              tail -20 /tmp/sta_log.txt 2>/dev/null
-            else
-              echo "NOTE: sta.rpt not found, skipping"
-            fi
+            cat src/fpga/detail_rpt.txt 2>/dev/null || echo "detail report not produced"
+            echo ""
+            echo "--- sta log tail ---"
+            tail -30 src/fpga/sta_detail.log 2>/dev/null
           } > "$OUT" 2>&1 || true
           echo "wrote $OUT"
 
