@@ -318,3 +318,19 @@ User supplied the full `ap_core.sta.rpt` from the measurement build (Quartus
   `-from [get_clocks ...] -to [get_clocks ...]` (setup 2, hold 1).
   Safe: SDRAM protocol timing is in clock cycles, not ns.
 - Detail script fixed: `report_timing -to [get_ports dram_dq*]`.
+
+---
+
+## 2026-09-29: Build #5 — 99MHz domain FIXED, outputs still fail
+
+### Build #4 result (timing-summary-5) — BREAKTHROUGH
+- general[2]: **+4.163ns, TNS 0.000** — ALL 112 endpoints fixed!
+  The get_clocks multicycle WORKED. 99MHz domain now closes.
+- general[3]: -5.439ns, TNS -183.735 — unchanged.
+
+### Output problem refined
+- FAST_OUTPUT_REGISTER assignments are in QSF and match pin names.
+- RTL uses tri-state: `assign dram_dq = dq_oe ? dq_out : 16'hzzzz`
+  The tri-state mux may prevent IOE register packing.
+- Detail report found no paths to dram_dq* (pattern issue).
+- Fixed detail script: explicit per-pin loops for dq, dqm, a.
