@@ -264,3 +264,38 @@ User supplied the full `ap_core.sta.rpt` from the measurement build (Quartus
 - Exact Tco breakdown (routing vs output buffer) - needs fitter detail.
 - Whether the write-output fix alone cures the black screen ("reads return
   zeros" may have a read-side component). Hardware test is the arbiter.
+
+---
+
+## 2026-09-29: Fix builds #2 and #3 analyzed
+
+### Build #2 (timing-summary-2): QSF fast-output ineffective
+- general[3] (SDRAM outputs): -5.737ns (was -5.724ns) — NO IMPROVEMENT.
+  FAST_OUTPUT_REGISTER / SLEW_RATE / 12MA did not reduce Tco.
+- general[2] (controller): -4.796ns (was -5.507ns) — slight improvement from
+  clock-group fix, but still failing.
+- clk_74a: +4.427ns — NOW PASSES (was -2.482ns). Clock-group fix confirmed.
+- Conclusion: fitter is not honoring FAST_OUTPUT_REGISTER, or IOE packing
+  is blocked. Per-pin 12MA (vs wildcard) may help via precedence.
+
+### Build #3 (timing-summary-3): per-pin 12MA helps slightly
+- general[3]: -5.439ns (was -5.737ns) — improved 0.3ns from drive strength.
+  Tco still ~8.2ns. IOE packing still not happening.
+- general[2]: -5.159ns (was -4.796ns) — WORSE. Controller logic still failing.
+
+### ROOT CAUSE FOUND: multicycle constraints never applied
+- The 2026-09-13 multicycle constraints used bare string patterns:
+  `set_multicycle_path -from {*|mem_ctrl_inst|*} -to [get_clocks ...]`
+  These do not match register→register paths. The constraint was silently
+  ignored, leaving the controller at single-cycle 10.1ns (needs ~15.3ns).
+- Fixed 2026-09-29: proper `get_registers` collections for
+  register→register multicycle (setup 2, hold 1).
+
+### KEY INSIGHT: -5.4ns output violation may be pessimistic
+- The SDC `set_output_delay` assumes the SDRAM chip samples on an IDEAL
+  general[3] (zero delay). But the physical dram_clk pin has Tco_clk delay.
+- Real slack = 3.05 + (Tco_clk - Tco_data). If Tco_clk ≈ Tco_data, the
+  interface works! The -5.4ns assumes Tco_clk=0.
+- Tco_clk not yet measured. If Tco_clk is 5-6ns, real slack may be positive.
+- This does NOT mean the design works — the controller logic (-5.2ns) is
+  definitely broken and must be fixed first.

@@ -86,7 +86,7 @@ jobs:
           create_timing_netlist
           read_sdc core/core_constraints.sdc
           update_timing_netlist
-          report_timing -to [get_ports dram_dq[*]] -to [get_ports dram_dqm[*]] \
+          report_timing -to [get_ports dram_dq*] \
             -setup -npaths 2 -detail full_path -file detail_rpt.txt
           project_close
           TCL

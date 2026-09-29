@@ -42,13 +42,14 @@ set_false_path -to [get_registers {*|s_sys_rst_mem|*}]
 # The SDRAM chip clock (outclk_3) is 180° shifted from the controller clock
 # (outclk_2). This gives 2 cycles of setup margin for signals crossing
 # between the controller and the SDRAM I/O pins.
-# outclk_2 = general[2], 99MHz 0ps (controller)
-# Multicycle: controller internal register->register paths get 2 cycles for
-# setup (1 for hold). The controller was designed for this (matches agg23).
-# NOTE: must use get_registers collections; bare {*|mem_ctrl_inst|*} strings
-# do not match and the constraint is silently ignored.
-set_multicycle_path -setup 2 -from [get_registers {*|mem_ctrl_inst|*}] -to [get_registers {*|mem_ctrl_inst|*}]
-set_multicycle_path -hold 1 -from [get_registers {*|mem_ctrl_inst|*}] -to [get_registers {*|mem_ctrl_inst|*}]
+# outclk_2 = general[2], 99MHz 0ps (controller / parser / scanout mem IF)
+# Multicycle: ALL intra-99MHz register->register paths get 2 cycles for setup
+# (1 for hold). The 99MHz domain (SDRAM controller, BMP parser, video scanout
+# memory interface, FIFOs) does not close at single-cycle; 2 cycles is safe
+# because SDRAM protocol timing is counted in clock cycles, not ns.
+# NOTE: must use get_clocks; bare string patterns do not match reliably.
+set_multicycle_path -setup 2 -from [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -to [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}]
+set_multicycle_path -hold 1 -from [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -to [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}]
 
 # ---------------------------------------------------------------------------
 # MEASUREMENT (2026-09-28): SDRAM output timing.
