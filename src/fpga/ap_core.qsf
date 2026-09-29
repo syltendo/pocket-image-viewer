@@ -613,6 +613,38 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[8]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[9]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[10]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[11]
+# ---------------------------------------------------------------------------
+# SDRAM output timing fix (2026-09-28).
+# Measured 2026-09-28 (ap_core.sta.rpt): dram_dq/dram_dqm outputs missed the
+# chip's 2.0ns setup requirement by 5.7ns (Tco ~8.8ns vs 3.05ns budget on the
+# 180-degree SDRAM clock). Pack the output registers into the IOEs, use fast
+# slew and stronger drive so the fitter can close the 5.05ns window.
+# ---------------------------------------------------------------------------
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dqm[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_ba[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_ras_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_cas_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_cke
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[*]
+set_instance_assignment -name SLEW_RATE 1 -to dram_dq[*]
+set_instance_assignment -name SLEW_RATE 1 -to dram_dqm[*]
+set_instance_assignment -name SLEW_RATE 1 -to dram_a[*]
+set_instance_assignment -name SLEW_RATE 1 -to dram_ba[*]
+set_instance_assignment -name SLEW_RATE 1 -to dram_ras_n
+set_instance_assignment -name SLEW_RATE 1 -to dram_cas_n
+set_instance_assignment -name SLEW_RATE 1 -to dram_we_n
+set_instance_assignment -name SLEW_RATE 1 -to dram_cke
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_dq[*]
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_dqm[*]
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_a[*]
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_ba[*]
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_ras_n
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_cas_n
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_we_n
+set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to dram_cke
 set_instance_assignment -name CURRENT_STRENGTH_NEW 8MA -to dbg_tx
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_we_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_wait

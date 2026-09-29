@@ -60,15 +60,18 @@ jobs:
           RPT="src/fpga/output_files/ap_core.sta.rpt"
           OUT="timing-summary.txt"
           {
-            echo "=== SDRAM write-data output timing (dram_dq / dram_dqm) ==="
+            echo "=== SDRAM output timing (dram_dq / dram_dqm / dram_a / dram_ba / ras / cas / we / cke) ==="
             echo "Constraint: set_output_delay -max 2.0ns vs 180deg SDRAM clock (5051ps)"
             echo ""
             if [ -f "$RPT" ]; then
-              echo "--- report head (summary tables) ---"
-              head -150 "$RPT"
+              echo "--- report head (first 160 lines: summary, SDC list, clocks) ---"
+              head -160 "$RPT"
               echo ""
-              echo "--- dram_dq / dram_dqm paths ---"
-              grep -i -B3 -A10 "dram_dq" "$RPT" | head -100
+              echo "--- Slow 1100mV 85C Fmax Summary ---"
+              awk '/; Slow 1100mV 85C Model Fmax Summary/{f=1} f{print} /; Timing Closure Recommendations/{if(f) exit}' "$RPT" | head -60
+              echo ""
+              echo "--- Slow 1100mV 85C Setup Summary (worst slack per clock transfer) ---"
+              awk '/; Slow 1100mV 85C Model Setup Summary/{f=1} f{print} /; Slow 1100mV 85C Model Hold Summary/{if(f) exit}' "$RPT" | head -150
             else
               echo "NOTE: $RPT not found"
             fi

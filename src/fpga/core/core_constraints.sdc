@@ -7,19 +7,23 @@
 # The PLL output counters - update hierarchy for pll_imageviewer
 # (ic = core_top instance name in apf_top)
 #
-# NOTE (2026-09-28): general[2] (99MHz controller clock, 0 deg) and general[3]
-# (99MHz SDRAM chip clock, 180 deg = 5051ps) are intentionally NOT in async
-# groups. They are frequency-locked with a known phase offset, and the SDRAM
-# output-delay constraints at the bottom of this file need TimeQuest to
-# analyze launch(general[2]) -> latch(general[3]) paths. (The old async groups
-# silently nullified both the multicycle exceptions below and any
-# output-delay constraints.)
+# NOTE (2026-09-28, revised): general[2] (99MHz controller clock, 0 deg) and
+# general[3] (99MHz SDRAM chip clock, 180 deg = 5051ps) are frequency-locked
+# with a known phase offset, so they share ONE group: TimeQuest analyzes
+# launch(general[2]) -> latch(general[3]) paths, which is what the SDRAM
+# output-delay constraints at the bottom of this file need. Both are cut from
+# every other clock (the video/bridge clocks), whose crossings already have
+# dedicated false-path synchronizer constraints below. (Putting general[2]
+# and general[3] in no group at all was tried and wrongly exposed unrelated
+# cross-domain paths, e.g. general[2] <-> clk_74a.)
 set_clock_groups -asynchronous \
  -group { bridge_spiclk } \
  -group { clk_74a } \
  -group { clk_74b } \
- -group { ic|mp1|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp1|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
+ -group { ic|mp1|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
+          ic|mp1|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk } \
+ -group { ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk \
+          ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk }
 
 # False paths for async FIFO Gray-code synchronizers (2FF sync is safe by design)
 # The synchronizer registers are in async_fifo instances; cut timing on them.
@@ -46,15 +50,22 @@ set_multicycle_path -from [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_O
 set_multicycle_path -from [get_clocks {ic|mp1|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -to {*|mem_ctrl_inst|*} -hold 1
 
 # ---------------------------------------------------------------------------
-# MEASUREMENT ONLY (2026-09-28): SDRAM write-data output timing.
+# MEASUREMENT (2026-09-28): SDRAM output timing.
 # Pocket SDRAM = Alliance AS4C32M16MSA-6BIN; datasheet AC characteristics:
 #   Data In Setup Time to Clock (tCDS) = 2.0 ns
 #   Data In Hold  Time to Clock (tCDH) = 1.0 ns
-# The DQ/DQM output registers launch on general[2] (0 deg); the chip samples
-# on general[3] (180 deg = 5051 ps later). These constraints make TimeQuest
-# report the real setup slack = 5.051 - 2.0 - Tco. Negative slack proves the
-# write path cannot meet timing; positive slack refutes it.
+#   Command/Address Setup (tCMS)       = 2.0 ns
+# The controller launches every SDRAM output on general[2] (0 deg); the chip
+# samples on general[3] (180 deg = 5051 ps later). Verified against the
+# controller RTL (sdram_ctrl.v): the WRITE command is launched one cycle
+# before the first data word, so each word is sampled half a cycle after its
+# launch. These constraints make TimeQuest report the real setup slack =
+# 5.051 - 2.0 - Tco. Negative slack proves that output cannot meet timing;
+# positive slack refutes it.
 # (Hold needs no constraint: data changes one full 10.1ns period later.)
 # ---------------------------------------------------------------------------
 set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_dq[*]}]
 set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_dqm[*]}]
+set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_a[*]}]
+set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_ba[*]}]
+set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_ras_n dram_cas_n dram_we_n dram_cke}]

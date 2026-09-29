@@ -142,3 +142,125 @@ All builds: full repo ZIP, commit title only (user preference).
 - Testbench: `/tmp/tb_sdram_ctrl.v` (Icarus Verilog, proves logic correct)
 - agg23 reference: `/tmp/agg23/agg23_sdram.sv`, `/tmp/agg23/agg23.sdc`
 - Goal: `~/workspace/goals/analogue-pocket-image-viewer-core/`
+
+---
+
+## 2026-09-28 — Resume: datasheet values found, measurement build prepared
+
+### New verified facts
+- Pocket SDRAM chip: **Alliance AS4C32M16MSA-6BIN** (512Mb/64MB, 32M×16, 1.8V mobile SDR),
+  per Analogue's developer docs (via picocomputer/rp6502 docs). Datasheet Rev 1.0 Dec 2017,
+  AC Characteristics table (-6 speed grade):
+  - **Data In Setup Time to Clock (tCDS) = 2.0 ns**
+  - **Data In Hold Time to Clock (tCDH) = 1.0 ns**
+  - Command/address setup (tCMS) = 2.0 ns, hold (tCMH) = 1.0 ns
+- Timing budget at 99MHz/180°: window = 5051ps; minus tDS 2.0ns leaves only
+  **3.05ns for FPGA Tco + board delay**. Tight but not impossible.
+- QSF sets **CURRENT_STRENGTH_NEW 4mA** on dram_dq/dram_dqm (weak drive setting;
+  contributes to Tco but not changed yet — measurement first).
+- DQ outputs ARE registered (dq_out/dq_oe/dqm_q in sdram_ctrl.v, clocked by
+  clk_mem = outclk_2/general[2]), so IOE packing is possible; report will show.
+- `dram_clk` (outclk_3/general[3]) goes straight to the output pin, unused
+  elsewhere in fabric — safe to analyze against general[2].
+- **Found: the old `set_clock_groups -asynchronous` listed general[2] and
+  general[3] in separate async groups, which silently nullified the 2026-09-13
+  multicycle constraints (clock groups take precedence).** They were never active.
+
+### Measurement build (delivered as pocket-image-viewer-timing-measure.zip)
+- `src/fpga/core/core_constraints.sdc`: removed general[2]/general[3] from async
+  clock groups; added `set_output_delay -max 2.0` on dram_dq[*]/dram_dqm[*]
+  vs general[3] (the 180° SDRAM clock). TimeQuest will report setup slack =
+  5.051 - 2.0 - Tco directly. Hold intentionally unconstrained (provably safe:
+  data changes a full 10.1ns period later).
+- `.github/workflows/build.yml`: new `timing-summary` artifact — small text
+  extract from ap_core.sta.rpt (head + dram_dq paths) for easy review.
+- Suggested commit title: "Measure SDRAM write-data output timing (tDS=2.0ns constraint)"
+
+### Awaiting
+- User pushes build, downloads `timing-summary` artifact, sends it back.
+- Verdict rule: negative slack on dram_dq outputs = write path provably cannot
+  meet timing at 180° (then fix = faster outputs: drive strength/slew/IOE, or
+  earlier launch). Positive slack = timing hypothesis refuted, look elsewhere
+  (signal integrity etc.).
+
+## 2026-09-28 — Timing measurement results (build 1)
+
+### Verified from timing-summary artifact (Quartus 21.1.1, ap_core, 5CEBA4F23C8)
+- Build compiled cleanly; new SDC accepted without errors (core_constraints.sdc: OK).
+- Clock topology confirmed: general[2] = 99.0MHz phase 0 (controller/clk_mem),
+  general[3] = 99.0MHz phase 180° (rise at 5.051ns, SDRAM clock to pin).
+- **Fmax(general[2]) = 64.07 MHz** (Slow 1100mV 85C) — some path(s) in the
+  controller clock domain FAIL setup at 99MHz (worst slack approx -5.5ns).
+  The failing path is not yet identified. This is a real timing violation in
+  the same clock domain that drives SDRAM writes; it may contribute to (or
+  explain) the write failures, but that is NOT proven — need the failing path.
+- The DQ/DQM output-delay slack numbers were NOT captured: the CI extraction
+  did `head -150` which truncated before the Setup Summary section, and the
+  `grep dram_dq` only matched signal-integrity tables. Extraction step fixed
+  in build.yml (section-aware: Fmax Summary + Setup Summary captured properly).
+
+### Unknown / still needed
+- Exact failing transfer(s) and path(s) behind Fmax 64.07MHz on general[2].
+- Setup slack on the dram_dq/dram_dqm output paths vs general[3] (the
+  tDS=2.0ns measurement this build was designed for).
+- Both live in the full ap_core.sta.rpt (quartus-reports artifact from the
+  same build). Asked user to send that file.
+
+### Lesson
+- When adding a CI-extracted report, verify the extraction actually captures
+  the intended section (section-aware awk on the bordered titles), not a blind
+  head/grep. Blind `head -150` silently dropped the one table that mattered.
+
+---
+
+## 2026-09-28: Full timing report analyzed (ap_core.sta.rpt)
+
+User supplied the full `ap_core.sta.rpt` from the measurement build (Quartus
+21.1.1, Cyclone V 5CEBA4F23C8, Slow 1100mV 85C).
+
+### VERIFIED
+- Clock topology confirmed: general[2] = 99.0MHz/0deg (controller), general[3]
+  = 99.0MHz/180.02deg = 5051ps (SDRAM chip clock). SDC accepted OK.
+- **SDRAM write-data outputs fail the chip's setup requirement by 5.7ns.**
+  `set_output_delay -max 2.0` vs general[3] on dram_dq[*]/dram_dqm[*]:
+  worst setup slack = **-5.724ns**, end-point TNS = -98.242ns (~18 failing
+  endpoints = all 16 DQ + 2 DQM). Hold slack = +14.047ns (fine).
+  Implied register-to-pin delay (Tco) ~8.8ns vs 3.05ns budget.
+- The 0.5-cycle (5.051ns) sampling model was verified against the controller
+  RTL: sdram_ctrl.v launches the WRITE command one cycle before the first
+  data word (S_WR_CMD -> S_WR_DATA), so the chip samples each word half a
+  cycle after launch. The 2.0ns requirement comes from the Alliance
+  AS4C32M16MSA-6BIN datasheet (tDS/tDH = 2.0/1.0ns, tCMS = 2.0ns).
+- Reference check (agg23/openfpga-snes, platform/pocket/pocket.tcl): same
+  4mA drive on dram_dq, FAST_OUTPUT_REGISTER commented out, general[2] and
+  general[3] in SEPARATE async groups, multicycle setup-2/hold-1 on the
+  controller instance. His design works on the same hardware, so the
+  interface can close timing - our 8.8ns Tco is fixable, not fundamental.
+- The sdram_ctrl.v header comment ("dram_clk lags by ~9.6ns / 340 deg") is
+  STALE - the PLL is configured for 5051ps = 180deg (pll_imageviewer.v).
+  History: 340deg -> 270deg -> 180deg; the comment was never updated.
+
+### HYPOTHESIS (fix packaged 2026-09-28)
+- The 8.8ns Tco is likely fitter placement + weak 4mA drive (+ default slew):
+  before the measurement build, no output constraint existed and the
+  general[2]<->general[3] transfers were cut, so the fitter never tried to
+  make these paths fast.
+- Fix: FAST_OUTPUT_REGISTER (+FAST_OUTPUT_ENABLE_REGISTER for the DQ
+  tristate) on all SDRAM outputs, SLEW_RATE fast, CURRENT_STRENGTH_NEW 12MA
+  (QSF); output-delay measurement extended to address/command pins
+  (dram_a, dram_ba, ras/cas/we, cke); clock groups corrected so
+  general[2]+general[3] share one group (transfers analyzed) while staying
+  cut from the video/bridge clocks.
+
+### SELF-INFLICTED CONSTRAINT BUG (fixed in this build)
+- The 2026-09-28 measurement build removed general[2]/general[3] from ALL
+  async groups, which wrongly exposed cross-domain paths
+  (general[2]<->clk_74a: 18+79 paths, general[2]<->general[0]: 90+14 paths).
+  The reported general[2] Fmax 64.07MHz / slack -5.507ns is therefore
+  contaminated and cannot be blamed on the design until re-measured with
+  the corrected groups.
+
+### UNKNOWN
+- Exact Tco breakdown (routing vs output buffer) - needs fitter detail.
+- Whether the write-output fix alone cures the black screen ("reads return
+  zeros" may have a read-side component). Hardware test is the arbiter.
