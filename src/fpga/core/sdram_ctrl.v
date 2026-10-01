@@ -369,6 +369,7 @@ module sdram_ctrl (
             // --------------------------------- open the row if needed
             S_PRE: begin
                 // If a write burst just finished, let tWR elapse first.
+                dq_oe <= 1'b0;  // tristate DQ after write burst
                 if (wr_dirty && timer != 16'd0) begin
                     timer <= timer - 1'b1;
                 end else begin
@@ -421,7 +422,6 @@ module sdram_ctrl (
                     dq_out <= 16'd0;
                 end
                 if (wbit == 3'd7) begin
-                    dq_oe    <= 1'b0;
                     dqm_q    <= 2'b00;
                     wr_dirty <= 1'b1;
                     timer    <= T_WR;              // tWR before any PRECHARGE
@@ -503,6 +503,7 @@ module sdram_ctrl (
             // ----------------------------- refresh between write bursts
             S_WREF_PRE: begin
                 // ...after tWR has elapsed (timer was set at burst end).
+                dq_oe <= 1'b0;  // tristate DQ after write burst
                 if (timer != 16'd0) begin
                     timer <= timer - 1'b1;
                 end else begin
@@ -532,6 +533,7 @@ module sdram_ctrl (
             S_FINISH: begin
                 // timer covers tWR (writes) or tRTP (reads) from the last
                 // burst before the PRECHARGE.
+                dq_oe <= 1'b0;  // tristate DQ after write burst
                 if (timer != 16'd0) begin
                     timer <= timer - 1'b1;
                 end else begin
