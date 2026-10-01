@@ -334,3 +334,30 @@ User supplied the full `ap_core.sta.rpt` from the measurement build (Quartus
   The tri-state mux may prevent IOE register packing.
 - Detail report found no paths to dram_dq* (pattern issue).
 - Fixed detail script: explicit per-pin loops for dq, dqm, a.
+
+---
+
+## 2026-09-29: Build #6 — output paths still invisible to report_timing
+
+### Build #5 result (timing-summary-6)
+- general[2]: +4.163ns (holds). general[3]: -5.439ns (unchanged).
+- Detail: "No setup paths were found" for ALL pins (dq, dqm, a).
+  The -5.439ns is NOT to the SDRAM output pins!
+- No input-delay constraints in SDC, so it's not the read path either.
+- New detail: `report_timing -to_clock general[3]` (all paths to that
+  clock domain) + `-from [get_ports dram_dq[*]]` (read direction).
+
+---
+
+## 2026-09-29: Build #7 — SDRAM clock reduced to 49.5MHz
+
+### Rationale
+- 99MHz output timing could not close: Tco 8.5ns vs 3.05ns budget (-5.44ns).
+- FAST_OUTPUT_REGISTER IOE packing did not take effect (reason unknown).
+- At 49.5MHz: budget = 10.101 - 2.0 = 8.10ns. Tco 8.5ns → slack ≈ -0.4ns.
+  At room temperature (vs 85°C worst-case model) this should work.
+- Bandwidth: 49.5MHz × 16-bit = 99MB/s > 69MB/s needed for 800×720.
+- Controller timing params (T_RCD=3, T_RP=3, etc.) are conservative and
+  still exceed chip minimums at half frequency. No RTL changes needed.
+- PLL: VCO=792, div 16 = 49.5MHz (was div 8 = 99MHz). Video 39.6MHz unchanged.
+- Phase shift updated: 180° at 49.5MHz = 10101ps (was 5051ps).

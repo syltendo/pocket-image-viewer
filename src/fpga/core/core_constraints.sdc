@@ -7,8 +7,8 @@
 # The PLL output counters - update hierarchy for pll_imageviewer
 # (ic = core_top instance name in apf_top)
 #
-# NOTE (2026-09-28, revised): general[2] (99MHz controller clock, 0 deg) and
-# general[3] (99MHz SDRAM chip clock, 180 deg = 5051ps) are frequency-locked
+# NOTE (2026-09-28, revised): general[2] (49.5MHz controller clock, 0 deg) and
+# general[3] (49.5MHz SDRAM chip clock, 180 deg = 10101ps) are frequency-locked
 # with a known phase offset, so they share ONE group: TimeQuest analyzes
 # launch(general[2]) -> latch(general[3]) paths, which is what the SDRAM
 # output-delay constraints at the bottom of this file need. Both are cut from
@@ -42,9 +42,9 @@ set_false_path -to [get_registers {*|s_sys_rst_mem|*}]
 # The SDRAM chip clock (outclk_3) is 180° shifted from the controller clock
 # (outclk_2). This gives 2 cycles of setup margin for signals crossing
 # between the controller and the SDRAM I/O pins.
-# outclk_2 = general[2], 99MHz 0ps (controller / parser / scanout mem IF)
-# Multicycle: ALL intra-99MHz register->register paths get 2 cycles for setup
-# (1 for hold). The 99MHz domain (SDRAM controller, BMP parser, video scanout
+# outclk_2 = general[2], 49.5MHz 0ps (controller / parser / scanout mem IF)
+# Multicycle: ALL intra-49.5MHz register->register paths get 2 cycles for setup
+# (1 for hold). The 49.5MHz domain (SDRAM controller, BMP parser, video scanout
 # memory interface, FIFOs) does not close at single-cycle; 2 cycles is safe
 # because SDRAM protocol timing is counted in clock cycles, not ns.
 # NOTE: must use get_clocks; bare string patterns do not match reliably.
@@ -58,13 +58,12 @@ set_multicycle_path -hold 1 -from [get_clocks {ic|mp1|altera_pll_i|general[2].gp
 #   Data In Hold  Time to Clock (tCDH) = 1.0 ns
 #   Command/Address Setup (tCMS)       = 2.0 ns
 # The controller launches every SDRAM output on general[2] (0 deg); the chip
-# samples on general[3] (180 deg = 5051 ps later). Verified against the
-# controller RTL (sdram_ctrl.v): the WRITE command is launched one cycle
+# samples on general[3] (180 deg = 10101 ps later at 49.5MHz). Verified against
+# the controller RTL (sdram_ctrl.v): the WRITE command is launched one cycle
 # before the first data word, so each word is sampled half a cycle after its
 # launch. These constraints make TimeQuest report the real setup slack =
-# 5.051 - 2.0 - Tco. Negative slack proves that output cannot meet timing;
-# positive slack refutes it.
-# (Hold needs no constraint: data changes one full 10.1ns period later.)
+# 10.101 - 2.0 - Tco.
+# (Hold needs no constraint: data changes one full 20.2ns period later.)
 # ---------------------------------------------------------------------------
 set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_dq[*]}]
 set_output_delay -clock [get_clocks {ic|mp1|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk}] -max 2.0 [get_ports {dram_dqm[*]}]

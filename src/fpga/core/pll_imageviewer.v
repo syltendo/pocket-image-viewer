@@ -6,11 +6,13 @@
 // Outputs (VCO = 792 MHz, fractional-N):
 //   outclk_0 :  39.6 MHz,   0 ps  - video pixel clock (800x720@60)
 //   outclk_1 :  39.6 MHz, 6313 ps - video pixel clock, 90 deg (scaler capture)
-//   outclk_2 :  99.0 MHz,   0 ps  - SDRAM controller clock
-//   outclk_3 :  99.0 MHz, 5051 ps - SDRAM chip clock (dram_clk), 180 deg
+//   outclk_2 :  49.5 MHz,   0 ps  - SDRAM controller clock
+//   outclk_3 :  49.5 MHz, 10101 ps - SDRAM chip clock (dram_clk), 180 deg
 //
-// NOTE: 99 MHz (not 100 MHz) is required because the video needs 39.6 MHz.
-// VCO=792 gives integer dividers for both: 792/20=39.6, 792/8=99.
+// NOTE: 49.5 MHz (not 99 MHz): the 99MHz SDRAM output timing could not close
+// (Tco 8.5ns vs 3.05ns budget). At 49.5MHz the budget is 8.1ns. Bandwidth
+// 49.5*16/8=99MB/s still exceeds the 69MB/s needed for 800x720.
+// VCO=792 gives integer dividers: 792/20=39.6 (video), 792/16=49.5.
 // 100 MHz has no common VCO with 39.6 MHz in the valid range.
 //
 // 180-degree shift matches agg23's proven SDRAM controller, which generates
@@ -24,8 +26,8 @@ module pll_imageviewer (
     input  wire rst,
     output wire outclk_0,   // 39.6 MHz video
     output wire outclk_1,   // 39.6 MHz video, 90 deg
-    output wire outclk_2,   // 99 MHz SDRAM controller
-    output wire outclk_3,   // 99 MHz SDRAM chip clock, 180 deg
+    output wire outclk_2,   // 49.5 MHz SDRAM controller
+    output wire outclk_3,   // 49.5 MHz SDRAM chip clock, 180 deg
     output wire locked
 );
 
@@ -40,11 +42,11 @@ module pll_imageviewer (
         .output_clock_frequency1("39.6 MHz"),
         .phase_shift1("6313 ps"),
         .duty_cycle1(50),
-        .output_clock_frequency2("99.0 MHz"),
+        .output_clock_frequency2("49.5 MHz"),
         .phase_shift2("0 ps"),
         .duty_cycle2(50),
-        .output_clock_frequency3("99.0 MHz"),
-        .phase_shift3("5051 ps"),
+        .output_clock_frequency3("49.5 MHz"),
+        .phase_shift3("10101 ps"),
         .duty_cycle3(50),
         .pll_type("General"),
         .pll_subtype("General")
