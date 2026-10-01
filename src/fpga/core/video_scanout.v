@@ -164,6 +164,24 @@ module video_scanout (
     end
     wire wr_burst_vid = wr_burst_v2;
 
+    // READBACK-CHECK result, synced to vid_clk:
+    //   01 = first word was 0xFFFF (write+read path works)
+    //   10 = first word was 0x0000 (read path returns zeros)
+    //   11 = first word was something else (corrupted)
+    //   00 = no data captured yet
+    wire [1:0] rb_result_m = !rb_first_captured ? 2'b00 :
+                             (rb_first_word == 16'hFFFF) ? 2'b01 :
+                             (rb_first_word == 16'h0000) ? 2'b10 : 2'b11;
+    reg [1:0] rb_result_v1, rb_result_v2;
+    always @(posedge vid_clk or negedge vid_rst_n) begin
+        if (!vid_rst_n) begin
+            rb_result_v1 <= 2'b00; rb_result_v2 <= 2'b00;
+        end else begin
+            rb_result_v1 <= rb_result_m; rb_result_v2 <= rb_result_v1;
+        end
+    end
+    wire [1:0] rb_result_vid = rb_result_v2;
+
     // ------------------------------------------------- mem_clk: control sync
     reg [2:0] dslot_m1, dslot_m2;
     reg [7:0] svalid_m1, svalid_m2;
@@ -202,6 +220,12 @@ module video_scanout (
     reg [31:0] pack_data;
     reg        pack_wr;
 
+    // READBACK-CHECK: capture the very first SDRAM word read back.
+    // In test mode the framebuffer was filled with 0xFFFF, so:
+    //   0xFFFF = write+read path works, 0x0000 = returns zeros, other = corrupt.
+    reg        rb_first_captured;
+    reg [15:0] rb_first_word;
+
     assign pfifo_wr_data = pack_data;
     assign pfifo_wr_en   = pack_wr;
     // accept an SDRAM word if we can pack it (need FIFO room only when
@@ -223,11 +247,18 @@ module video_scanout (
             pack_w0 <= 16'd0;
             pack_data <= 32'd0;
             pack_wr <= 1'b0;
+            rb_first_captured <= 1'b0;
+            rb_first_word <= 16'd0;
         end else begin
             pack_wr <= 1'b0;
 
             // pack incoming SDRAM words into pixels
             if (rd_valid && rd_ready) begin
+                // readback-check: latch the first word ever captured
+                if (!rb_first_captured) begin
+                    rb_first_word <= rd_data;
+                    rb_first_captured <= 1'b1;
+                end
                 if (!pack_have) begin
                     pack_w0   <= rd_data;
                     pack_have <= 1'b1;
@@ -321,7 +352,17 @@ module video_scanout (
             // FIFO pop: one entry per active pixel; data valid next cycle.
             // rd_en_q doubles as the "data valid next cycle" flag.
             rd_en_q <= (hpos < H_ACTIVE) && (vpos < V_ACTIVE) && !pfifo_rd_empty;
-            if (rd_en_q) begin
+            // READBACK-CHECK override: solid color shows what the SDRAM
+            // actually returned for the first word (test pattern = 0xFFFF).
+            // Takes priority over all other diagnostics.
+            if ((hpos < H_ACTIVE) && (vpos < V_ACTIVE) && rb_result_vid != 2'b00) begin
+                if (rb_result_vid == 2'b01)
+                    rgb_q <= 24'h00FF00;  // GREEN: SDRAM stored 0xFFFF, readback works!
+                else if (rb_result_vid == 2'b10)
+                    rgb_q <= 24'hFF0000;  // RED: SDRAM read back as zeros
+                else
+                    rgb_q <= 24'h0000FF;  // BLUE: readback corrupted (non-zero, non-FFFF)
+            end else if (rd_en_q) begin
                 // DEBUG: if FIFO data is all zeros and slot is valid, the
                 // SDRAM returned zeros. Distinguish "no writes happened"
                 // (dark red) from "writes happened but data lost" (black).
