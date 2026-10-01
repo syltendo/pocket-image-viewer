@@ -361,3 +361,21 @@ User supplied the full `ap_core.sta.rpt` from the measurement build (Quartus
   still exceed chip minimums at half frequency. No RTL changes needed.
 - PLL: VCO=792, div 16 = 49.5MHz (was div 8 = 99MHz). Video 39.6MHz unchanged.
 - Phase shift updated: 180° at 49.5MHz = 10101ps (was 5051ps).
+
+### Build #7 results (2026-10-01, CI run 36899897064)
+- Build: SUCCESS, all 12 CI steps green, 5m27s. Clocks confirmed in report:
+  general[3] (SDRAM chip) = 49.5MHz / 180.0 deg (10.101ns shift), general[2]
+  (controller) = 49.5MHz.
+- Timing (Slow 1100mV 85C sign-off corner), setup worst slacks:
+  general[3] -0.389ns (TNS -3.136, ~8 failing paths), clk_74a +4.643,
+  bridge_spiclk +10.743, general[0] +17.635, general[2] +21.716.
+  Hold/recovery/removal/min-pulse-width: all positive.
+  Slow 0C: general[3] -0.325ns. Fast models: all positive.
+- Improvement of exactly ~5.05ns (-5.439 -> -0.389) matches the half-period
+  budget gain (3.05ns -> 8.10ns), confirming the failing paths are
+  register->SDRAM-pin outputs with ~8.5ns pin delay vs 8.10ns budget.
+- Release zip: syltendo.imageviewer_0.1.0-20261001.zip (CI artifact
+  pocket-image-viewer).
+- Status: timing does NOT fully close (-0.39ns at worst corner), but the
+  violation is small and corner-pessimistic. Hardware test pending — this is
+  the informative next step before any further timing tweaks.
