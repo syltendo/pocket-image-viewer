@@ -352,16 +352,12 @@ module video_scanout (
             // FIFO pop: one entry per active pixel; data valid next cycle.
             // rd_en_q doubles as the "data valid next cycle" flag.
             rd_en_q <= (hpos < H_ACTIVE) && (vpos < V_ACTIVE) && !pfifo_rd_empty;
-            // READBACK-CHECK override: solid color shows what the SDRAM
-            // actually returned for the first word (test pattern = 0xFFFF).
-            // Takes priority over all other diagnostics.
-            if ((hpos < H_ACTIVE) && (vpos < V_ACTIVE) && rb_result_vid != 2'b00) begin
-                if (rb_result_vid == 2'b01)
-                    rgb_q <= 24'h00FF00;  // GREEN: SDRAM stored 0xFFFF, readback works!
-                else if (rb_result_vid == 2'b10)
-                    rgb_q <= 24'hFF0000;  // RED: SDRAM read back as zeros
-                else
-                    rgb_q <= 24'h0000FF;  // BLUE: readback corrupted (non-zero, non-FFFF)
+            // VIDEO PIPELINE TEST: solid MAGENTA, bypasses SDRAM entirely.
+            // If the screen is MAGENTA, the video pipeline (PLL, timing,
+            // output) works and the fault is in SDRAM. If the screen is
+            // still BLACK, the video pipeline itself is broken.
+            if ((hpos < H_ACTIVE) && (vpos < V_ACTIVE)) begin
+                rgb_q <= 24'hFF00FF;  // MAGENTA: video test pattern
             end else if (rd_en_q) begin
                 // DEBUG: if FIFO data is all zeros and slot is valid, the
                 // SDRAM returned zeros. Distinguish "no writes happened"
