@@ -937,8 +937,11 @@ always @(posedge clk_74a) begin
     t_vs <= !((t_vpos >= 10'd724) && (t_vpos < 10'd728));
     // data enable: active area 800x720
     t_de <= (t_hpos < 11'd800) && (t_vpos < 10'd720);
-    // color: GREEN if PLL locked, RED if not
-    t_rgb <= pll_locked_raw ? 24'h00FF00 : 24'hFF0000;
+    // color: GREEN=PLL locked & reset released (should run),
+    //        RED=PLL locked but reset held (Pocket not releasing),
+    //        BLUE=PLL not locked
+    t_rgb <= !pll_locked_raw ? 24'h0000FF :
+             (reset_n ? 24'h00FF00 : 24'hFF0000);
 end
 
 // Mux between normal video pipeline and PLL test pattern
