@@ -952,8 +952,11 @@ assign video_de  = pll_test_mode ? t_de  : scanout_de;
 assign video_vs  = pll_test_mode ? t_vs  : scanout_vs;
 assign video_hs  = pll_test_mode ? t_hs  : scanout_hs;
 
-assign video_rgb_clock = pll_test_mode ? clk_74a : clk_vid;
-assign video_rgb_clock_90 = pll_test_mode ? clk_74a : clk_vid_90;
+// TEST: Use clk_vid (PLL output) for video clock.
+// If screen is BLACK, clk_vid is not toggling (PLL output broken).
+// If screen is GREEN, clk_vid works.
+assign video_rgb_clock = pll_test_mode ? clk_vid : clk_vid;
+assign video_rgb_clock_90 = pll_test_mode ? clk_vid_90 : clk_vid_90;
 
 // pixel FIFO: 4096 x 32 (16 KB)
 async_fifo #(
