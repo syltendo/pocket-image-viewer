@@ -7,7 +7,7 @@
 //   outclk_0 :  39.6 MHz,   0 ps  - video pixel clock (800x720@60)
 //   outclk_1 :  39.6 MHz, 6313 ps - video pixel clock, 90 deg (scaler capture)
 //   outclk_2 :  49.5 MHz,   0 ps  - SDRAM controller clock
-//   outclk_3 :  49.5 MHz, 10101 ps - SDRAM chip clock (dram_clk), 180 deg
+//   outclk_3 :  49.5 MHz, 11223 ps - SDRAM chip clock (dram_clk), 200 deg (was 180)
 //
 // NOTE: 49.5 MHz (not 99 MHz): the 99MHz SDRAM output timing could not close
 // (Tco 8.5ns vs 3.05ns budget). At 49.5MHz the budget is 8.1ns. Bandwidth
@@ -46,7 +46,7 @@ module pll_imageviewer (
         .phase_shift2("0 ps"),
         .duty_cycle2(50),
         .output_clock_frequency3("49.5 MHz"),
-        .phase_shift3("10101 ps"),
+        .phase_shift3("11223 ps"),  // 200 deg: +1.1ns setup vs 180 deg
         .duty_cycle3(50),
         .pll_type("General"),
         .pll_subtype("General")
