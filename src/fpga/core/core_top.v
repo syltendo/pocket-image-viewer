@@ -914,7 +914,7 @@ video_scanout scanout_inst (
 // PLL LOCK TEST: Bypass the normal video pipeline and drive the display
 // directly from clk_74a (no PLL). GREEN = PLL locked, RED = PLL not locked.
 // If the screen is BLACK, the core is not loaded or video output is broken.
-wire pll_test_mode = 1'b1;  // hardcode for this diagnostic build
+wire pll_test_mode = 1'b0;  // use normal video pipeline (MAGENTA test)
 wire pll_locked_raw = pll_core_locked;  // raw lock signal from PLL
 
 reg [10:0] t_hpos;
