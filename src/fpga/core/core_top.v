@@ -903,16 +903,54 @@ video_scanout scanout_inst (
     .pfifo_rd_empty ( pfifo_rd_empty ),
     .pfifo_rd_en    ( pfifo_rd_en ),
 
-    .video_rgb      ( video_rgb ),
-    .video_de       ( video_de ),
-    .video_vs       ( video_vs ),
-    .video_hs       ( video_hs ),
+    .video_rgb      ( scanout_rgb ),
+    .video_de       ( scanout_de ),
+    .video_vs       ( scanout_vs ),
+    .video_hs       ( scanout_hs ),
     .video_skip     ( video_skip ),
     .underrun       ( video_underrun )
 );
 
-assign video_rgb_clock = clk_vid;
-assign video_rgb_clock_90 = clk_vid_90;
+// PLL LOCK TEST: Bypass the normal video pipeline and drive the display
+// directly from clk_74a (no PLL). GREEN = PLL locked, RED = PLL not locked.
+// If the screen is BLACK, the core is not loaded or video output is broken.
+wire pll_test_mode = 1'b1;  // hardcode for this diagnostic build
+wire pll_locked_raw = pll_core_locked;  // raw lock signal from PLL
+
+reg [10:0] t_hpos;
+reg [9:0]  t_vpos;
+reg        t_hs, t_vs, t_de;
+reg [23:0] t_rgb;
+
+always @(posedge clk_74a) begin
+    if (t_hpos == 11'd1649) begin
+        t_hpos <= 11'd0;
+        if (t_vpos == 10'd749)
+            t_vpos <= 10'd0;
+        else
+            t_vpos <= t_vpos + 10'd1;
+    end else begin
+        t_hpos <= t_hpos + 11'd1;
+    end
+    // sync pulses (active low)
+    t_hs <= !((t_hpos >= 11'd808) && (t_hpos < 11'd872));
+    t_vs <= !((t_vpos >= 10'd724) && (t_vpos < 10'd728));
+    // data enable: active area 800x720
+    t_de <= (t_hpos < 11'd800) && (t_vpos < 10'd720);
+    // color: GREEN if PLL locked, RED if not
+    t_rgb <= pll_locked_raw ? 24'h00FF00 : 24'hFF0000;
+end
+
+// Mux between normal video pipeline and PLL test pattern
+wire [23:0] scanout_rgb;
+wire        scanout_de, scanout_vs, scanout_hs;
+assign video_rgb = pll_test_mode ? (t_de ? t_rgb : 24'd0) : scanout_rgb;
+assign video_de  = pll_test_mode ? t_de  : scanout_de;
+assign video_vs  = pll_test_mode ? t_vs  : scanout_vs;
+assign video_hs  = pll_test_mode ? t_hs  : scanout_hs;
+
+assign video_rgb_clock = pll_test_mode ? clk_74a : clk_vid;
+assign video_rgb_clock_90 = pll_test_mode ? clk_74a : clk_vid_90;
 
 // pixel FIFO: 4096 x 32 (16 KB)
 async_fifo #(
