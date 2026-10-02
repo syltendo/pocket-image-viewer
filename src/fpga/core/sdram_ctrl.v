@@ -126,10 +126,10 @@ module sdram_ctrl (
     wire [1:0]  b_bank = req_addr[24:23];
     wire [12:0] b_row  = req_addr[22:10];
     wire [9:0]  b_col  = req_addr[9:0];
-    wire [9:0]  b_col_aligned = b_col & ~10'd7;
-    wire [2:0]  b_off  = b_col[2:0];
-    wire [20:0] b_max  = 21'd8 - {18'd0, b_off};
-    wire [20:0] b_n    = (req_rem < b_max) ? req_rem : b_max; // 1..8
+    wire [9:0]  b_col_aligned = b_col;  // no alignment for BL=1
+    wire [2:0]  b_off  = 3'd0;         // no offset for BL=1
+    wire [20:0] b_max  = 21'd1;
+    wire [20:0] b_n    = (req_rem < 21'd1) ? req_rem : 21'd1; // always 1
     wire [3:0]  b_n4   = b_n[3:0];
     wire [24:0] nxt_addr = req_addr + b_n;   // request position after this burst
     wire next_row_hit = open_valid && (open_bank == nxt_addr[24:23])
@@ -201,18 +201,18 @@ module sdram_ctrl (
     // cycles [issue+5, issue+12]); bit [RD_TAP+8] marks the burst finished.
     // Because READs are spaced >= 8 cycles apart, back-to-back bursts give
     // a contiguous capture stream.
-    localparam CAP_W = RD_TAP + 9;     // bits 0 .. RD_TAP+8
+    localparam CAP_W = RD_TAP + 2;     // bits 0 .. RD_TAP+1 (BL=1)
     reg [CAP_W-1:0] cap_dly;
     wire issue_now = (state == S_RD_CMD) && (timer == 16'd0) && (rd_gap == 4'd0)
                      && rdf_room && (rdf_inflight < 4'd4);
-    wire cap_en    = |cap_dly[RD_TAP+7:RD_TAP];
-    wire fin_pulse = cap_dly[RD_TAP+8];
+    wire cap_en    = cap_dly[RD_TAP];  // single word capture (BL=1)
+    wire fin_pulse = cap_dly[RD_TAP+1];  // burst finished after 1 word
     reg [3:0] rdf_inflight;            // READs issued, capture not finished
 
     // Space accounting: never issue a READ unless the FIFO can absorb it
     // plus everything already in flight.
     wire [6:0] rdf_occ = {1'b0, rdf_level} + {rdf_inflight, 3'b0};
-    wire rdf_room = (rdf_occ <= 7'd24); // 24 + new burst of 8 <= 32
+    wire rdf_room = (rdf_occ <= 7'd31); // 31 + new word of 1 <= 32
 
     // ------------------------------------------------------- refresh
     reg [9:0] ref_cnt;
@@ -321,10 +321,11 @@ module sdram_ctrl (
             end
             S_INIT_REF2: begin
                 if (timer == 16'd0) begin
-                    // MODE REGISTER SET: burst length 8, sequential, CL=3
+                    // MODE REGISTER SET: burst length 1, sequential, CL=3, single write
+                    // (matches agg23 proven design)
                     dram_ras_n <= 1'b0; dram_cas_n <= 1'b0;
                     dram_we_n  <= 1'b0; dram_ba <= 2'd0;
-                    dram_a <= 13'b0_00_011_0_011;
+                    dram_a <= 13'b0_01_011_0_000;
                     state <= S_INIT_MRS; timer <= T_MRD;
                 end else timer <= timer - 1'b1;
             end
@@ -411,34 +412,27 @@ module sdram_ctrl (
                 // else: wait for the writer to stream more words
             end
             S_WR_DATA: begin
-                // One word per clock; masked slots drive DQM (don't-care data).
+                // Single word write (BL=1, no burst).
                 dq_oe <= 1'b1;
-                dqm_q  <= b_mask[wbit] ? 2'b11 : 2'b00;
-                if (!b_mask[wbit]) begin
-                    dq_out    <= wrf_out;
-                    wrf_rd_en <= 1'b1;
-                    diag_wr_word <= diag_wr_word + 1'b1;
-                end else begin
-                    dq_out <= 16'd0;
-                end
-                if (wbit == 3'd7) begin
-                    dqm_q    <= 2'b00;
-                    wr_dirty <= 1'b1;
-                    timer    <= T_WR;              // tWR before any PRECHARGE
-                    req_addr <= req_addr + b_n;
-                    req_rem  <= req_rem - b_n;
-                    if (req_rem == b_n)
-                        state <= S_FINISH;        // last burst
-                    else if (ref_pending)
-                        state <= S_WREF_PRE;      // refresh first
-                    else if (next_row_hit) begin
-                        timer <= 16'd0;            // row still open: no tRCD
-                        state <= S_WR_CMD;
-                    end else
-                        state <= S_PRE;           // row changed: precharge
-                end else begin
-                    wbit <= wbit + 1'b1;
-                end
+                dqm_q  <= 2'b00;  // no masking
+                dq_out    <= wrf_out;
+                wrf_rd_en <= 1'b1;
+                diag_wr_word <= diag_wr_word + 1'b1;
+                // Done after 1 word
+                dqm_q    <= 2'b00;
+                wr_dirty <= 1'b1;
+                timer    <= T_WR;              // tWR before any PRECHARGE
+                req_addr <= req_addr + 21'd1;
+                req_rem  <= req_rem - 21'd1;
+                if (req_rem == 21'd1)
+                    state <= S_FINISH;        // last word
+                else if (ref_pending)
+                    state <= S_WREF_PRE;      // refresh first
+                else if (next_row_hit) begin
+                    timer <= 16'd0;            // row still open: no tRCD
+                    state <= S_WR_CMD;
+                end else
+                    state <= S_PRE;           // row changed: precharge
             end
 
             // -------------------------------------------- read bursts
@@ -454,7 +448,7 @@ module sdram_ctrl (
                     dram_a  <= {3'd0, b_col_aligned};
                     req_addr <= req_addr + b_n;
                     req_rem  <= req_rem - b_n;
-                    rd_gap   <= 4'd7;              // next READ >= 8 clocks out
+                    rd_gap   <= 4'd3;              // next READ >= 4 clocks out (BL=1)
                     state    <= S_RD_NEXT;
                 end
                 // else: no room, wait (gap already 0)
