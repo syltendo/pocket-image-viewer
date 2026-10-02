@@ -83,7 +83,7 @@ module sdram_ctrl (
     localparam T_MRD      = 2;         // MODE REGISTER SET -> next command
     localparam T_RTP      = 2;         // last read data -> PRECHARGE
     localparam RD_TAP     = 4;         // capture cycles [issue+5, issue+12]
-    localparam T_REFI     = 780;       // 7.8 us refresh interval
+    localparam T_REFI     = 390;       // 7.8 us refresh interval at 49.5MHz (was 780 at 99MHz)
     localparam INIT_WAIT  = 20000;     // 200 us power-up wait
 
     // ---------------------------------------------------------------- states
